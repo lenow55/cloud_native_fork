@@ -774,6 +774,7 @@ func (instance *Instance) Rewind(postgresMajorVersion int) error {
 		"-P",
 		"--source-server", primaryConnInfo + " dbname=postgres",
 		"--target-pgdata", instance.PgData,
+		"--debug",
 	}
 
 	// As PostgreSQL 13 introduces support of restore from the WAL archive in pg_rewind,
