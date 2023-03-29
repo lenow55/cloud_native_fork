@@ -760,7 +760,7 @@ func (instance *Instance) removePgControlFileBackup() error {
 
 // Rewind uses pg_rewind to align this data directory with the contents of the primary node.
 // If postgres major version is >= 13, add "--restore-target-wal" option
-func (instance *Instance) Rewind(postgresMajorVersion int) error {
+func (instance *Instance) Rewind(cluster *apiv1.Cluster, postgresMajorVersion int) error {
 	// Signal the liveness probe that we are running pg_rewind before starting postgres
 	instance.PgRewindIsRunning = true
 	defer func() {
@@ -769,7 +769,7 @@ func (instance *Instance) Rewind(postgresMajorVersion int) error {
 
 	instance.LogPgControldata("before pg_rewind")
 
-	primaryConnInfo := instance.GetPrimaryConnInfo()
+	primaryConnInfo := instance.GetPrimaryDirectConnInfo(cluster.Status.CurrentPrimary)
 	options := []string{
 		"-P",
 		"--source-server", primaryConnInfo + " dbname=postgres",
@@ -970,4 +970,9 @@ func (instance *Instance) DropConnections() error {
 // GetPrimaryConnInfo returns the DSN to reach the primary
 func (instance *Instance) GetPrimaryConnInfo() string {
 	return buildPrimaryConnInfo(instance.ClusterName+"-rw", instance.PodName)
+}
+
+// GetPrimaryConnInfo returns the DSN to reach the primary
+func (instance *Instance) GetPrimaryDirectConnInfo(primaryPod string) string {
+	return buildPrimaryConnInfo(primaryPod, instance.PodName)
 }
