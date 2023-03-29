@@ -769,7 +769,7 @@ func (instance *Instance) Rewind(cluster *apiv1.Cluster, postgresMajorVersion in
 
 	instance.LogPgControldata("before pg_rewind")
 
-	primaryConnInfo := instance.GetPrimaryDirectConnInfo(cluster.Status.CurrentPrimary)
+	primaryConnInfo := instance.GetPrimaryDirectConnInfo(cluster)
 	options := []string{
 		"-P",
 		"--source-server", primaryConnInfo + " dbname=postgres",
@@ -973,6 +973,6 @@ func (instance *Instance) GetPrimaryConnInfo() string {
 }
 
 // GetPrimaryConnInfo returns the DSN to reach the primary
-func (instance *Instance) GetPrimaryDirectConnInfo(primaryPod string) string {
-	return buildPrimaryConnInfo(primaryPod, instance.PodName)
+func (instance *Instance) GetPrimaryDirectConnInfo(cluster *apiv1.Cluster) string {
+	return buildPrimaryConnInfo(cluster.Status.CurrentPrimary+"."+instance.ClusterName+"-any", instance.PodName)
 }
