@@ -769,6 +769,8 @@ func (instance *Instance) Rewind(cluster *apiv1.Cluster, postgresMajorVersion in
 
 	instance.LogPgControldata("before pg_rewind")
 
+    // использую другую функцию для получения адреса
+    // первичного инстанса
 	primaryConnInfo := instance.GetPrimaryDirectConnInfo(cluster)
 	options := []string{
 		"-P",
@@ -973,6 +975,8 @@ func (instance *Instance) GetPrimaryConnInfo() string {
 }
 
 // GetPrimaryConnInfo returns the DSN to reach the primary
+// Эта ссылка ведёт к разрешению имени пода через сервис -any
+// в результате соединение устанавливается напрямую до пода по его ip
 func (instance *Instance) GetPrimaryDirectConnInfo(cluster *apiv1.Cluster) string {
 	return buildPrimaryConnInfo(cluster.Status.CurrentPrimary+"."+instance.ClusterName+"-any", instance.PodName)
 }

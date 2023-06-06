@@ -232,6 +232,8 @@ func (r *InstanceReconciler) verifyPgDataCoherenceForPrimary(
 		// The only way to check if we really need to start it up before
 		// invoking pg_rewind is to try using pg_rewind and, on failures,
 		// retrying after having started up the instance.
+        // изменил передаваемые параметры в функции Rewind
+        // теперь дополнительно она принимает указатель на информацию о кластере
 		err = r.instance.Rewind(cluster, pgMajorVersion)
 		if err != nil {
 			contextLogger.Info(
@@ -247,6 +249,7 @@ func (r *InstanceReconciler) verifyPgDataCoherenceForPrimary(
 			}
 
 			// Then let's go back to the point of the new primary
+            // и здесь поменял
 			err = r.instance.Rewind(cluster, pgMajorVersion)
 			if err != nil {
 				return err
