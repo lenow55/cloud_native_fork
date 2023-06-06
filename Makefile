@@ -36,12 +36,12 @@ OPERATOR_MANIFEST_PATH := ${DIST_PATH}/operator-manifest.yaml
 
 BUILD_IMAGE ?= true
 POSTGRES_IMAGE_NAME ?= $(shell grep 'DefaultImageName.*=' "pkg/versions/versions.go" | cut -f 2 -d \")
-KUSTOMIZE_VERSION ?= v5.0.1
+KUSTOMIZE_VERSION ?= v5.0.3
 KIND_CLUSTER_NAME ?= pg
-KIND_CLUSTER_VERSION ?= v1.26.2
-CONTROLLER_TOOLS_VERSION ?= v0.11.3
-GORELEASER_VERSION ?= v1.16.2
-SPELLCHECK_VERSION ?= 0.30.0
+KIND_CLUSTER_VERSION ?= v1.27.2
+CONTROLLER_TOOLS_VERSION ?= v0.12.0
+GORELEASER_VERSION ?= v1.18.2
+SPELLCHECK_VERSION ?= 0.32.0
 WOKE_VERSION ?= 0.19.0
 ARCH ?= amd64
 
@@ -100,6 +100,9 @@ e2e-test-kind: ## Run e2e tests locally using kind.
 e2e-test-k3d: ## Run e2e tests locally using k3d.
 	hack/e2e/run-e2e-k3d.sh
 
+e2e-test-local: ## Run e2e tests locally using the default kubernetes context.
+	hack/e2e/run-e2e-local.sh
+
 ##@ Build
 build: generate fmt vet ## Build binaries.
 	go build -o bin/manager -ldflags ${LDFLAGS} ./cmd/manager
@@ -109,7 +112,7 @@ run: generate fmt vet manifests ## Run against the configured Kubernetes cluster
 	go run ./cmd/manager
 
 docker-build: go-releaser ## Build the docker image.
-	GOOS=linux GOARCH=${ARCH} DATE=${DATE} COMMIT=${COMMIT} VERSION=${VERSION} \
+	GOOS=linux GOARCH=${ARCH} GOPATH=$(go env GOPATH) DATE=${DATE} COMMIT=${COMMIT} VERSION=${VERSION} \
 	  $(GO_RELEASER) build --skip-validate --clean --single-target
 	DOCKER_BUILDKIT=1 docker build . -t ${CONTROLLER_IMG} --build-arg VERSION=${VERSION}
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"sort"
 	"time"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -27,7 +28,7 @@ import (
 
 // DatabaseRole represents the role information read from / written to the Database
 // The password management in the apiv1.RoleConfiguration assumes the use of Secrets,
-// so cannot cleanly mapped to Postgres
+// so cannot cleanly be mapped to Postgres
 type DatabaseRole struct {
 	Name            string         `json:"name"`
 	Comment         string         `json:"comment,omitempty"`
@@ -42,6 +43,7 @@ type DatabaseRole struct {
 	ValidUntil      *time.Time     `json:"validUntil,omitempty"`
 	InRoles         []string       `json:"inRoles,omitempty"`
 	password        sql.NullString `json:"-"`
+	ignorePassword  bool           `json:"-"`
 	transactionID   int64          `json:"-"`
 }
 
@@ -54,17 +56,38 @@ func (d *DatabaseRole) passwordNeedsUpdating(
 		storedPasswordState[d.Name].TransactionID != d.transactionID
 }
 
-func (d *DatabaseRole) isCommentEqual(inSpec apiv1.RoleConfiguration) bool {
+func (d *DatabaseRole) hasSameCommentAs(inSpec apiv1.RoleConfiguration) bool {
 	return d.Comment == inSpec.Comment
 }
 
-// isEquivalent checks a subset of the attributes of roles in DB and Spec
+func (d *DatabaseRole) isInSameRolesAs(inSpec apiv1.RoleConfiguration) bool {
+	if len(d.InRoles) == 0 && len(inSpec.InRoles) == 0 {
+		return true
+	}
+
+	if len(d.InRoles) != len(inSpec.InRoles) {
+		return false
+	}
+
+	sort.Strings(d.InRoles)
+	sort.Strings(inSpec.InRoles)
+	return reflect.DeepEqual(d.InRoles, inSpec.InRoles)
+}
+
+func (d *DatabaseRole) hasSameValidUntilAs(inSpec apiv1.RoleConfiguration) bool {
+	if inSpec.ValidUntil == nil && d.ValidUntil == nil {
+		return true
+	}
+	if inSpec.ValidUntil != nil && d.ValidUntil != nil {
+		return d.ValidUntil.Equal(inSpec.ValidUntil.Time)
+	}
+
+	return false
+}
+
+// isEquivalentTo checks a subset of the attributes of roles in DB and Spec
 // leaving passwords and role membership (InRoles) to be done separately
-//
-// TODO: timestamp parsing is necessary here, as we may have non-identical
-// strings back from Postgres.
-// And, in the Spec, do we use Postgres timestamp format?
-func (d *DatabaseRole) isEquivalent(inSpec apiv1.RoleConfiguration) bool {
+func (d *DatabaseRole) isEquivalentTo(inSpec apiv1.RoleConfiguration) bool {
 	type reducedEntries struct {
 		Name            string
 		Superuser       bool
@@ -75,9 +98,7 @@ func (d *DatabaseRole) isEquivalent(inSpec apiv1.RoleConfiguration) bool {
 		Replication     bool
 		BypassRLS       bool
 		ConnectionLimit int64
-		ValidUntil      string
 	}
-
 	role := reducedEntries{
 		Name:            d.Name,
 		Superuser:       d.Superuser,
@@ -88,7 +109,6 @@ func (d *DatabaseRole) isEquivalent(inSpec apiv1.RoleConfiguration) bool {
 		Replication:     d.Replication,
 		BypassRLS:       d.BypassRLS,
 		ConnectionLimit: d.ConnectionLimit,
-		// ValidUntil:      inDB.ValidUntil,
 	}
 	spec := reducedEntries{
 		Name:            inSpec.Name,
@@ -100,23 +120,17 @@ func (d *DatabaseRole) isEquivalent(inSpec apiv1.RoleConfiguration) bool {
 		Replication:     inSpec.Replication,
 		BypassRLS:       inSpec.BypassRLS,
 		ConnectionLimit: inSpec.ConnectionLimit,
-		// ValidUntil:      inSpec.ValidUntil,
 	}
 
-	return reflect.DeepEqual(role, spec)
+	return reflect.DeepEqual(role, spec) && d.hasSameValidUntilAs(inSpec)
 }
 
-type databaseRoleBuilder struct {
-	role DatabaseRole
-}
-
-// newDatabaseRoleBuilder creates a new databaseRoleBuilder
-func newDatabaseRoleBuilder() *databaseRoleBuilder {
-	return &databaseRoleBuilder{}
-}
-
-func (d *databaseRoleBuilder) withRole(role apiv1.RoleConfiguration) *databaseRoleBuilder {
-	d.role = DatabaseRole{
+// roleFromSpec converts an apiv1.RoleConfiguration into the equivalent DatabaseRole
+//
+// NOTE: for passwords, the default behavior, if the RoleConfiguration does not either
+// provide a PasswordSecret or explicitly set DisablePassword, is to IGNORE the password
+func roleFromSpec(role apiv1.RoleConfiguration) DatabaseRole {
+	dbRole := DatabaseRole{
 		Name:            role.Name,
 		Comment:         role.Comment,
 		Superuser:       role.Superuser,
@@ -128,22 +142,17 @@ func (d *databaseRoleBuilder) withRole(role apiv1.RoleConfiguration) *databaseRo
 		BypassRLS:       role.BypassRLS,
 		ConnectionLimit: role.ConnectionLimit,
 		InRoles:         role.InRoles,
-		password:        d.role.password,
 	}
-
 	if role.ValidUntil != nil {
-		d.role.ValidUntil = &role.ValidUntil.Time
+		dbRole.ValidUntil = &role.ValidUntil.Time
 	}
-	return d
-}
-
-func (d *databaseRoleBuilder) withPassword(password string) *databaseRoleBuilder {
-	d.role.password = sql.NullString{String: password, Valid: password != ""}
-	return d
-}
-
-func (d *databaseRoleBuilder) build() DatabaseRole {
-	return d.role
+	switch {
+	case role.PasswordSecret == nil && !role.DisablePassword:
+		dbRole.ignorePassword = true
+	case role.PasswordSecret == nil && role.DisablePassword:
+		dbRole.password = sql.NullString{}
+	}
+	return dbRole
 }
 
 // RoleManager abstracts the functionality of reconciling with PostgreSQL roles
@@ -162,4 +171,8 @@ type RoleManager interface {
 	GetLastTransactionID(ctx context.Context, role DatabaseRole) (int64, error)
 	// UpdateComment Update the comment of role in the database
 	UpdateComment(ctx context.Context, role DatabaseRole) error
+	// UpdateMembership Update the In Role membership of role in the database
+	UpdateMembership(ctx context.Context, role DatabaseRole, rolesToGrant []string, rolesToRevoke []string) error
+	// GetParentRoles returns the roles the given role is a member of
+	GetParentRoles(ctx context.Context, role DatabaseRole) ([]string, error)
 }

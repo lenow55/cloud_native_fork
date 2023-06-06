@@ -24,7 +24,7 @@ if [ "${DEBUG-}" = true ]; then
 fi
 
 # Defaults
-K8S_DEFAULT_VERSION=v1.26.0
+K8S_DEFAULT_VERSION=v1.27.2
 K8S_VERSION=${K8S_VERSION:-$K8S_DEFAULT_VERSION}
 KUBECTL_VERSION=${KUBECTL_VERSION:-$K8S_VERSION}
 ENGINE=${CLUSTER_ENGINE:-kind}
@@ -198,8 +198,7 @@ create_cluster_k3d() {
   local cluster_name=$2
 
   local latest_k3s_tag
-  latest_k3s_tag=$(curl -sL "https://registry.hub.docker.com/v1/repositories/rancher/k3s/tags" |
-    jq -r '.[].name' | grep -- "^${k8s_version//./\\.}"'\+-k3s[0-9]$' | tail -n 1)
+  latest_k3s_tag=$(k3d version list k3s | grep -- "^${k8s_version//./\\.}"'\+-k3s[0-9]$' | tail -n 1)
 
   local volumes=()
   if [ -n "${DOCKER_REGISTRY_MIRROR:-}" ] || [ -n "${ENABLE_REGISTRY:-}" ]; then
@@ -266,7 +265,7 @@ destroy_k3d() {
 }
 
 check_registry_k3d() {
-  [ -n "$(check_registry "k3d-${cluster_name}")" ]
+  [ -n "$(check_registry "k3d-${CLUSTER_NAME}")" ]
 }
 
 ##

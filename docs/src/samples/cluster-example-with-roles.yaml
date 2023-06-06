@@ -4,12 +4,13 @@ metadata:
   name: cluster-example-with-roles
 spec:
   instances: 3
-
   storage:
     size: 1Gi
 
   managed:
     roles:
+    - name: app
+      createdb: true
     - name: dante
       ensure: present
       comment: my database-side comment
@@ -21,7 +22,7 @@ spec:
       replication: false
       bypassrls: false
       connectionLimit: 4
-      validUntil: "2023-04-12T15:04:05Z"
+      validUntil: "2053-04-12T15:04:05Z"
       inRoles:
         - pg_monitor
         - pg_signal_backend

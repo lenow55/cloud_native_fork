@@ -19,6 +19,7 @@ package e2e
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -84,6 +85,9 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 	)
 
 	BeforeEach(func() {
+		if os.Getenv("TEST_SKIP_UPGRADE") != "" {
+			Skip("Skipping upgrade test because TEST_SKIP_UPGRADE variable is defined")
+		}
 		if testLevelEnv.Depth < int(level) {
 			Skip("Test depth is lower than the amount requested for this test")
 		}
@@ -280,12 +284,14 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 		return env.DeleteNamespaceAndWait(operatorNamespace, 60)
 	}
 
-	assertCreateNamespace := func(namespace string) {
+	assertCreateNamespace := func(namespacePrefix string) string {
+		var namespace string
 		By(fmt.Sprintf(
 			"having a '%s' upgradeNamespace",
-			namespace), func() {
+			namespacePrefix), func() {
+			var err error
 			// Create a upgradeNamespace for all the resources
-			err := env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Creating a upgradeNamespace should be quick
@@ -300,6 +306,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 				return namespaceResource.GetName(), err
 			}, 20).Should(BeEquivalentTo(namespace))
 		})
+		return namespace
 	}
 
 	applyUpgrade := func(upgradeNamespace string) {
@@ -321,7 +328,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 		By("setting up minio", func() {
 			setup, err := testsUtils.MinioDefaultSetup(upgradeNamespace)
 			Expect(err).ToNot(HaveOccurred())
-			err = testsUtils.InstallMinio(env, setup, 300)
+			err = testsUtils.InstallMinio(env, setup, uint(testTimeouts[testsUtils.MinioInstallation]))
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -360,7 +367,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 
 		// Cluster ready happens after minio is ready
 		By("having a Cluster with three instances ready", func() {
-			AssertClusterIsReady(upgradeNamespace, clusterName1, 600, env)
+			AssertClusterIsReady(upgradeNamespace, clusterName1, testTimeouts[testsUtils.ClusterIsReady], env)
 		})
 
 		// Now that everything is in place, we add a bit of data we'll use to
@@ -517,7 +524,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 
 		By("installing a second Cluster on the upgraded operator", func() {
 			CreateResourceFromFile(upgradeNamespace, sampleFile2)
-			AssertClusterIsReady(upgradeNamespace, clusterName2, 600, env)
+			AssertClusterIsReady(upgradeNamespace, clusterName2, testTimeouts[testsUtils.ClusterIsReady], env)
 		})
 
 		AssertConfUpgrade(clusterName2, upgradeNamespace)
@@ -527,7 +534,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 		By("restoring the backup taken from the first Cluster in a new cluster", func() {
 			restoredClusterName := "cluster-restore"
 			CreateResourceFromFile(upgradeNamespace, restoreFile)
-			AssertClusterIsReady(upgradeNamespace, restoredClusterName, 800, env)
+			AssertClusterIsReady(upgradeNamespace, restoredClusterName, testTimeouts[testsUtils.ClusterIsReadySlow], env)
 
 			// Test data should be present on restored primary
 			primary := restoredClusterName + "-1"
@@ -569,20 +576,20 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 
 	It("works after an upgrade with rolling upgrade ", func() {
 		// set upgradeNamespace for log naming
-		upgradeNamespace := rollingUpgradeNamespace
+		upgradeNamespacePrefix := rollingUpgradeNamespace
 		mostRecentTag, err := testsUtils.GetMostRecentReleaseTag("../../releases")
 		Expect(err).NotTo(HaveOccurred())
 
 		GinkgoWriter.Printf("installing the recent CNPG tag %s\n", mostRecentTag)
 		testsUtils.InstallLatestCNPGOperator(mostRecentTag, env)
-		assertCreateNamespace(upgradeNamespace)
+		upgradeNamespace := assertCreateNamespace(upgradeNamespacePrefix)
 		DeferCleanup(cleanupNamespace, upgradeNamespace)
 		applyUpgrade(upgradeNamespace)
 	})
 
 	It("works after an upgrade with online upgrade", func() {
 		// set upgradeNamespace for log naming
-		upgradeNamespace := onlineUpgradeNamespace
+		upgradeNamespacePrefix := onlineUpgradeNamespace
 		By("applying environment changes for current upgrade to be performed", func() {
 			testsUtils.EnableOnlineUpgradeForInstanceManager(operatorNamespace, configName, env)
 		})
@@ -593,7 +600,7 @@ var _ = Describe("Upgrade", Label(tests.LabelUpgrade, tests.LabelNoOpenshift), O
 		GinkgoWriter.Printf("installing the recent CNPG tag %s\n", mostRecentTag)
 		testsUtils.InstallLatestCNPGOperator(mostRecentTag, env)
 
-		assertCreateNamespace(upgradeNamespace)
+		upgradeNamespace := assertCreateNamespace(upgradeNamespacePrefix)
 		DeferCleanup(cleanupNamespace, upgradeNamespace)
 		applyUpgrade(upgradeNamespace)
 

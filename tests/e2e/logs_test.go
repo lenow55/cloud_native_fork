@@ -53,11 +53,12 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 	})
 
 	It("correctly produces logs in JSON format", func() {
-		namespace = "json-logs-e2e"
+		const namespacePrefix = "json-logs-e2e"
 		clusterName = "postgresql-json-logs"
 		const sampleFile = fixturesDir + "/json_logs/cluster-json-logs.yaml.template"
+		var namespaceErr error
 		// Create a cluster in a namespace we'll delete after the test
-		namespaceErr := env.CreateNamespace(namespace)
+		namespace, namespaceErr = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(namespaceErr).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			return env.DeleteNamespace(namespace)
@@ -173,13 +174,12 @@ var _ = Describe("JSON log output", Label(tests.LabelObservability), func() {
 
 		By("verifying pg_rewind logs after deleting the old primary pod", func() {
 			// Force-delete the primary
-			zero := int64(0)
 			currentPrimary, _ := env.GetClusterPrimary(namespace, clusterName)
-			forceDelete := &client.DeleteOptions{
-				GracePeriodSeconds: &zero,
+			quickDelete := &client.DeleteOptions{
+				GracePeriodSeconds: &quickDeletionPeriod,
 			}
 
-			deletePodError := env.DeletePod(namespace, currentPrimary.GetName(), forceDelete)
+			deletePodError := env.DeletePod(namespace, currentPrimary.GetName(), quickDelete)
 			Expect(deletePodError).ToNot(HaveOccurred())
 
 			// Expect a new primary to be elected

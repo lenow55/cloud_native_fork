@@ -99,6 +99,7 @@ func (info InitInfo) Restore(ctx context.Context) error {
 		return err
 	}
 
+	// If we need to download data from a backup, we do it
 	backup, env, err := info.loadBackup(ctx, typedClient, cluster)
 	if err != nil {
 		return err
@@ -516,7 +517,7 @@ func (info InitInfo) WriteInitialPostgresqlConf(cluster *apiv1.Cluster) error {
 	if err != nil {
 		return fmt.Errorf("while reading configuration files from ConfigMap: %w", err)
 	}
-	_, err = temporaryInstance.RefreshConfigurationFilesFromCluster(cluster)
+	_, err = temporaryInstance.RefreshConfigurationFilesFromCluster(cluster, false)
 	if err != nil {
 		return fmt.Errorf("while reading configuration files from ConfigMap: %w", err)
 	}

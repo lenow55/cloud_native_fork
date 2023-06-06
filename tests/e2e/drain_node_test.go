@@ -95,7 +95,7 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 		// PVC(s).
 
 		It("can drain the primary pod's node with 3 pods on 2 nodes", func() {
-			namespace = "drain-node-e2e-pvc-on-two-nodes"
+			const namespacePrefix = "drain-node-e2e-pvc-on-two-nodes"
 			By("leaving only two nodes uncordoned", func() {
 				// mark a node unschedulable so the pods will be distributed only on two nodes
 				for _, cordonNode := range nodesWithLabels[:len(nodesWithLabels)-2] {
@@ -104,9 +104,9 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 					Expect(err).ToNot(HaveOccurred())
 				}
 			})
-
+			var err error
 			// Create a cluster in a namespace we'll delete after the test
-			err := env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)
@@ -147,7 +147,8 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 			}
 
 			// Drain the node containing the primary pod and store the list of running pods
-			podsOnPrimaryNode := nodes.DrainPrimaryNode(namespace, clusterName, env)
+			podsOnPrimaryNode := nodes.DrainPrimaryNode(namespace, clusterName,
+				testTimeouts[testsUtils.DrainNode], env)
 
 			By("verifying failover after drain", func() {
 				timeout := 180
@@ -189,7 +190,7 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 			primary, err = env.GetClusterPrimary(namespace, clusterName)
 			Expect(err).ToNot(HaveOccurred())
 			AssertDataExpectedCountWithDatabaseName(namespace, primary.Name, "app", "test", 2)
-			assertClusterStandbysAreStreaming(namespace, clusterName)
+			AssertClusterStandbysAreStreaming(namespace, clusterName, 120)
 		})
 
 		// Scenario: all the pods of a cluster are on a single node and another schedulable node exists.
@@ -213,7 +214,7 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 				}
 			})
 			It("can drain the primary pod's node with 3 pods on 1 nodes", func() {
-				namespace = "drain-node-e2e-pvc-on-one-nodes"
+				const namespacePrefix = "drain-node-e2e-pvc-on-one-nodes"
 				var cordonNodes []string
 				By("leaving only one node uncordoned", func() {
 					// cordon all nodes but one
@@ -224,9 +225,9 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 						Expect(err).ToNot(HaveOccurred())
 					}
 				})
-
+				var err error
 				// Create a cluster in a namespace we'll delete after the test
-				err := env.CreateNamespace(namespace)
+				namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 				Expect(err).ToNot(HaveOccurred())
 				DeferCleanup(func() error {
 					return env.DeleteNamespace(namespace)
@@ -274,7 +275,8 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 				})
 
 				// Drain the node containing the primary pod and store the list of running pods
-				podsOnPrimaryNode := nodes.DrainPrimaryNode(namespace, clusterName, env)
+				podsOnPrimaryNode := nodes.DrainPrimaryNode(namespace, clusterName,
+					testTimeouts[testsUtils.DrainNode], env)
 
 				By("verifying failover after drain", func() {
 					timeout := 180
@@ -313,17 +315,18 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 				primary, err = env.GetClusterPrimary(namespace, clusterName)
 				Expect(err).ToNot(HaveOccurred())
 				AssertDataExpectedCountWithDatabaseName(namespace, primary.Name, "app", "test", 2)
-				assertClusterStandbysAreStreaming(namespace, clusterName)
+				AssertClusterStandbysAreStreaming(namespace, clusterName, 120)
 			})
 		})
 	})
 
 	Context("Maintenance on, reuse pvc off", func() {
 		// Set unique namespace
-		const namespace = "drain-node-e2e-pvc-off-single-node"
+		const namespacePrefix = "drain-node-e2e-pvc-off-single-node"
 		const sampleFile = fixturesDir + "/drain-node/cluster-drain-node-pvc-off.yaml.template"
 		const clusterName = "cluster-drain-node"
 
+		var namespace string
 		JustAfterEach(func() {
 			if CurrentSpecReport().Failed() {
 				env.DumpNamespaceObjects(namespace, "out/"+CurrentSpecReport().LeafNodeText+".log")
@@ -343,9 +346,9 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 					Expect(err).ToNot(HaveOccurred())
 				}
 			})
-
+			var err error
 			// Create a cluster in a namespace we'll delete after the test
-			err := env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)
@@ -363,7 +366,7 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 			})
 
 			// Retrieve the names of the current pods. All of them should
-			// not exists anymore after the drain
+			// not exist anymore after the drain
 			var podsBeforeDrain []string
 			By("retrieving the current pods' names", func() {
 				podList, err := env.GetClusterPodList(namespace, clusterName)
@@ -387,20 +390,18 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 
 			// Drain the node containing the primary pod. Pods should be moved
 			// to the node we've just uncordoned
-			nodes.DrainPrimaryNode(namespace, clusterName, env)
+			nodes.DrainPrimaryNode(namespace, clusterName, testTimeouts[testsUtils.DrainNode], env)
 
 			// Expect pods to be recreated and to be ready
-			AssertClusterIsReady(namespace, clusterName, 600, env)
+			AssertClusterIsReady(namespace, clusterName, testTimeouts[testsUtils.ClusterIsReady], env)
 
 			// Expect pods to be running on the uncordoned node and to have new names
 			By("verifying cluster pods changed names", func() {
-				timeout := 300
-				Eventually(func() bool {
+				timeout := 600
+				Eventually(func(g Gomega) {
 					matchingNames := 0
 					podList, err := env.GetClusterPodList(namespace, clusterName)
-					if err != nil {
-						return false
-					}
+					g.Expect(err).ToNot(HaveOccurred())
 					for _, pod := range podList.Items {
 						// compare the old pod list with the current pod names
 						for _, oldName := range podsBeforeDrain {
@@ -409,15 +410,16 @@ var _ = Describe("E2E Drain Node", Serial, Label(tests.LabelDisruptive, tests.La
 							}
 						}
 					}
-					return len(podList.Items) == 3 && matchingNames == 0
-				}, timeout).Should(BeTrue())
+					g.Expect(len(podList.Items)).To(BeEquivalentTo(3))
+					g.Expect(matchingNames).To(BeEquivalentTo(0))
+				}, timeout).Should(Succeed())
 			})
 
 			// Expect the (previously created) test data to be available
 			primary, err = env.GetClusterPrimary(namespace, clusterName)
 			Expect(err).ToNot(HaveOccurred())
 			AssertDataExpectedCountWithDatabaseName(namespace, primary.Name, "app", "test", 2)
-			assertClusterStandbysAreStreaming(namespace, clusterName)
+			AssertClusterStandbysAreStreaming(namespace, clusterName, 120)
 			err = nodes.UncordonAllNodes(env)
 			Expect(err).ToNot(HaveOccurred())
 		})

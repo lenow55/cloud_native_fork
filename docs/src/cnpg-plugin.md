@@ -88,6 +88,14 @@ run:
 kubectl krew install cnpg
 ```
 
+When a new version of the plugin is released, you can update the existing
+installation with:
+
+```sh
+kubectl krew update
+kubectl krew upgrade cnpg
+```
+
 ### Supported Architectures
 
 CloudNativePG Plugin is currently built for the following
@@ -192,7 +200,7 @@ Cluster in healthy state
 Name:               sandbox
 Namespace:          default
 System ID:          7039966298120953877
-PostgreSQL Image:   ghcr.io/cloudnative-pg/postgresql:15.2
+PostgreSQL Image:   ghcr.io/cloudnative-pg/postgresql:15.3
 Primary instance:   sandbox-2
 Instances:          3
 Ready instances:    3
@@ -237,7 +245,7 @@ Cluster in healthy state
 Name:               sandbox
 Namespace:          default
 System ID:          7039966298120953877
-PostgreSQL Image:   ghcr.io/cloudnative-pg/postgresql:15.2
+PostgreSQL Image:   ghcr.io/cloudnative-pg/postgresql:15.3
 Primary instance:   sandbox-2
 Instances:          3
 Ready instances:    3
@@ -525,7 +533,36 @@ Archive:  reportRedacted.zip
   inflating: report_operator_<TIMESTAMP>/manifests/cnpg-webhook-cert.yaml
 ```
 
-You can verify that the confidential information is REDACTED:
+If you activated the `--logs` option, you'd see an extra subdirectory:
+
+```shell
+Archive:  report_operator_<TIMESTAMP>.zip
+  <snipped …>
+  creating: report_operator_<TIMESTAMP>/operator-logs/
+  inflating: report_operator_<TIMESTAMP>/operator-logs/cnpg-controller-manager-66fb98dbc5-pxkmh-logs.jsonl
+```
+
+!!! Note
+    The plugin will try to get the PREVIOUS operator's logs, which is helpful
+    when investigating restarted operators.
+    In all cases, it will also try to get the CURRENT operator logs. If current
+    and previous logs are available, it will show them both.
+
+``` json
+====== Begin of Previous Log =====
+2023-03-28T12:56:41.251711811Z {"level":"info","ts":"2023-03-28T12:56:41Z","logger":"setup","msg":"Starting CloudNativePG Operator","version":"1.19.1","build":{"Version":"1.19.0+dev107","Commit":"cc9bab17","Date":"2023-03-28"}}
+2023-03-28T12:56:41.251851909Z {"level":"info","ts":"2023-03-28T12:56:41Z","logger":"setup","msg":"Starting pprof HTTP server","addr":"0.0.0.0:6060"}
+  <snipped …>
+
+====== End of Previous Log =====
+2023-03-28T12:57:09.854306024Z {"level":"info","ts":"2023-03-28T12:57:09Z","logger":"setup","msg":"Starting CloudNativePG Operator","version":"1.19.1","build":{"Version":"1.19.0+dev107","Commit":"cc9bab17","Date":"2023-03-28"}}
+2023-03-28T12:57:09.854363943Z {"level":"info","ts":"2023-03-28T12:57:09Z","logger":"setup","msg":"Starting pprof HTTP server","addr":"0.0.0.0:6060"}
+```
+
+If the operator hasn't been restarted, you'll still see the `====== Begin …`
+and  `====== End …` guards, with no content inside.
+
+You can verify that the confidential information is REDACTED by default:
 
 ```shell
 cd report_operator_<TIMESTAMP>/manifests/
@@ -737,13 +774,15 @@ kubectl cnpg hibernate status <cluster-name>
 
 ### Benchmarking the database with pgbench
 
-Pgbench can be ran on an existing PostgreSQL cluster with following command:
+Pgbench can be run against an existing PostgreSQL cluster with following
+command:
 
 ```
 kubectl cnpg pgbench <cluster-name> -- --time 30 --client 1 --jobs 1
 ```
 
-Refer to the [Benchmarking pgbench section](benchmarking.md#pgbench) for more details.
+Refer to the [Benchmarking pgbench section](benchmarking.md#pgbench) for more
+details.
 
 ### Benchmarking the storage with fio
 
@@ -790,7 +829,7 @@ it from the actual pod. This means that you will be using the `postgres` user.
 ```shell
 kubectl cnpg psql cluster-example
 
-psql (15.2 (Debian 15.2-1.pgdg110+1))
+psql (15.3 (Debian 15.3-1.pgdg110+1))
 Type "help" for help.
 
 postgres=#
@@ -801,7 +840,7 @@ select to work against a replica by using the `--replica` option:
 
 ```shell
 kubectl cnpg psql --replica cluster-example
-psql (15.2 (Debian 15.2-1.pgdg110+1))
+psql (15.3 (Debian 15.3-1.pgdg110+1))
 
 Type "help" for help.
 
@@ -816,3 +855,47 @@ postgres=# \q
 
 This command will start `kubectl exec`, and the `kubectl` executable must be
 reachable in your `PATH` variable to correctly work.
+
+### Snapshotting a Postgres cluster
+
+The `kubectl cnpg snapshot` creates consistent snapshots of a Postgres
+`Cluster` by:
+
+1. choosing a replica Pod to work on
+2. fencing the replica
+3. taking the snapshot
+4. unfencing the replica
+
+!!! Warning
+    A cluster already having a fenced instance cannot be snapshotted.
+
+At the moment, this command can be used only for clusters having at least one
+replica: that replica will be shut down by the fencing procedure to ensure the
+snapshot to be consistent (cold backup). As the development of
+declarative support for Kubernetes' `VolumeSnapshot` API continues,
+this limitation will be removed, allowing you to take online backups
+as business continuity requires.
+
+!!! Important
+    Even if the procedure will shut down a replica, the primary
+    Pod will not be involved.
+
+The `kubectl cnpg snapshot` command requires the cluster name:
+
+```shell
+kubectl cnpg snapshot cluster-example
+
+waiting for cluster-example-3 to be fenced
+waiting for VolumeSnapshot cluster-example-3-1682539624 to be ready to use
+unfencing pod cluster-example-3
+```
+
+The `VolumeSnapshot` resource will be created with an empty
+`VolumeSnapshotClass` reference. That resource is intended by be used by the
+`VolumeSnapshotClass` configured as default.
+
+A specific `VolumeSnapshotClass` can be requested via the `-c` option:
+
+```shell
+kubectl cnpg snapshot cluster-example -c longhorn
+```

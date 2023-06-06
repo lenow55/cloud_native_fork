@@ -25,13 +25,11 @@ import (
 
 var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 	const (
-		namespace                         = "switchover-e2e"
-		sampleFileWithoutReplicationSlots = fixturesDir + "/base/cluster-storage-class.yaml.template"
-		sampleFileWithReplicationSlots    = fixturesDir + "/base/cluster-storage-class-with-rep-slots.yaml.template"
-		clusterName                       = "postgresql-storage-class"
+		sampleFileWithoutReplicationSlots = fixturesDir + "/switchover/cluster-switchover.yaml.template"
+		sampleFileWithReplicationSlots    = fixturesDir + "/switchover/cluster-switchover-with-rep-slots.yaml.template"
 		level                             = tests.Medium
 	)
-
+	var namespace string
 	BeforeEach(func() {
 		if testLevelEnv.Depth < int(level) {
 			Skip("Test depth is lower than the amount requested for this test")
@@ -40,7 +38,9 @@ var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 	Context("with HA Replication slots", func() {
 		It("reacts to switchover requests", func() {
 			// Create a cluster in a namespace we'll delete after the test
-			err := env.CreateNamespace(namespace)
+			const namespacePrefix = "switchover-e2e-with-slots"
+			var err error
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				if CurrentSpecReport().Failed() {
@@ -48,6 +48,8 @@ var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 				}
 				return env.DeleteNamespaceAndWait(namespace, 60)
 			})
+			clusterName, err := env.GetResourceNameFromYAML(sampleFileWithReplicationSlots)
+			Expect(err).ToNot(HaveOccurred())
 
 			AssertCreateCluster(namespace, clusterName, sampleFileWithReplicationSlots, env)
 			AssertSwitchover(namespace, clusterName, env)
@@ -58,7 +60,9 @@ var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 	Context("without HA Replication slots", func() {
 		It("reacts to switchover requests", func() {
 			// Create a cluster in a namespace we'll delete after the test
-			err := env.CreateNamespace(namespace)
+			const namespacePrefix = "switchover-e2e"
+			var err error
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				if CurrentSpecReport().Failed() {
@@ -66,6 +70,8 @@ var _ = Describe("Switchover", Serial, Label(tests.LabelSelfHealing), func() {
 				}
 				return env.DeleteNamespaceAndWait(namespace, 60)
 			})
+			clusterName, err := env.GetResourceNameFromYAML(sampleFileWithoutReplicationSlots)
+			Expect(err).ToNot(HaveOccurred())
 
 			AssertCreateCluster(namespace, clusterName, sampleFileWithoutReplicationSlots, env)
 			AssertSwitchover(namespace, clusterName, env)

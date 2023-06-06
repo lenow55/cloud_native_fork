@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+env:
+  GOLANG_VERSION: "1.20.x"
+
 jobs:
   # Label the source pull request with 'backport-requested' and all supported releases label, the goal is, by default
   # we backport everything
@@ -15,7 +18,7 @@ jobs:
     name: label the source pr
     if: github.event.pull_request.merged == false &&
         !contains(github.event.pull_request.labels.*.name, 'backport-requested')
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       -
         name: label the pull request
@@ -27,9 +30,10 @@ jobs:
             backport-requested :arrow_backward:
             release-1.18
             release-1.19
+            release-1.20
       -
         name: Create comment
-        uses: peter-evans/create-or-update-comment@v2
+        uses: peter-evans/create-or-update-comment@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.pull_request.number }}
@@ -51,13 +55,14 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'backport-requested :arrow_backward:')
         ) &&
         !contains(github.event.pull_request.labels.*.name, 'do not backport')
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         branch:
           -  release-1.18
           -  release-1.19
+          -  release-1.20
     env:
       PR: ${{ github.event.pull_request.number }}
     outputs:
@@ -71,6 +76,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ matrix.branch }}
           token: ${{ secrets.REPO_GHA_PAT }}
+      -
+        name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GOLANG_VERSION }}
       -
         name: Check commits
         if: contains( github.event.pull_request.labels.*.name, matrix.branch )
@@ -119,7 +129,7 @@ jobs:
     env:
       PR: ${{ github.event.pull_request.number }}
       COMMIT: ${{ needs.back-porting-pr.outputs.commit }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: create ticket
         uses: dacbd/create-issue-action@v1

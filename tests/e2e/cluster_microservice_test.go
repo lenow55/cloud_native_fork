@@ -25,6 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/versions"
 	"github.com/cloudnative-pg/cloudnative-pg/tests"
 	testsUtils "github.com/cloudnative-pg/cloudnative-pg/tests/utils"
@@ -64,13 +66,13 @@ var _ = Describe("Imports with Microservice Approach", Label(tests.LabelImportin
 
 	It("can import a database with large objects", func() {
 		var err error
-		namespace = "microservice-large-object"
+		const namespacePrefix = "microservice-large-object"
 		sourceClusterName, err = env.GetResourceNameFromYAML(sourceSampleFile)
 		Expect(err).ToNot(HaveOccurred())
 
 		oid := 16393
 		data := "large object test"
-		err = env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			return env.DeleteNamespace(namespace)
@@ -87,11 +89,11 @@ var _ = Describe("Imports with Microservice Approach", Label(tests.LabelImportin
 
 	It("can import a database", func() {
 		var err error
-		namespace = "microservice"
+		const namespacePrefix = "microservice"
 		sourceClusterName, err = env.GetResourceNameFromYAML(sourceSampleFile)
 		Expect(err).ToNot(HaveOccurred())
 
-		err = env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			return env.DeleteNamespace(namespace)
@@ -106,10 +108,11 @@ var _ = Describe("Imports with Microservice Approach", Label(tests.LabelImportin
 	})
 
 	It("can select one from several databases to import", func() {
-		namespace = "microservice-different-db"
+		var err error
+		const namespacePrefix = "microservice-different-db"
 		importedClusterName = "cluster-pgdump-different-db"
 		// create namespace
-		err := env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			return env.DeleteNamespace(namespace)
@@ -122,10 +125,10 @@ var _ = Describe("Imports with Microservice Approach", Label(tests.LabelImportin
 		// Test case which will check cluster is not created when we use a
 		// nonexistent database in cluster definition while importing
 		var err error
-		namespace = "cnpg-microservice-error"
+		const namespacePrefix = "cnpg-microservice-error"
 		sourceClusterName, err = env.GetResourceNameFromYAML(sourceSampleFile)
 		Expect(err).ToNot(HaveOccurred())
-		err = env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			return env.DeleteNamespace(namespace)
@@ -152,20 +155,27 @@ var _ = Describe("Imports with Microservice Approach", Label(tests.LabelImportin
 	})
 
 	It("can import to a cluster with a different major version", func() {
-		desiredSourceVersion := "11"
-		namespace = "microservice-different-db-version"
+		const namespacePrefix = "microservice-different-db-version"
 		importedClusterName = "cluster-pgdump-different-db-version"
 
-		// this test case only applicable postgres version 11
-		if shouldSkip(desiredSourceVersion) {
-			Skip("This test is only applicable for PostgreSQL " + desiredSourceVersion)
+		// Gather the current image
+		postgresImage := os.Getenv("POSTGRES_IMG")
+		Expect(postgresImage).ShouldNot(BeEmpty(), "POSTGRES_IMG env should not be empty")
+
+		// this test case is only applicable if we are not already on the latest major
+		if shouldSkip(postgresImage) {
+			Skip("Already running on the latest major. This test is not applicable for PostgreSQL " + postgresImage)
 		}
 
-		targetImage := versions.DefaultImageName
+		// Gather the target image
+		targetImage, err := testsUtils.BumpPostgresImageMajorVersion(postgresImage)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(targetImage).ShouldNot(BeEmpty(), "targetImage could not be empty")
 
 		By(fmt.Sprintf("import cluster with different major, target version is %s", targetImage), func() {
+			var err error
 			// create namespace
-			err := env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)
@@ -176,9 +186,18 @@ var _ = Describe("Imports with Microservice Approach", Label(tests.LabelImportin
 	})
 })
 
-// check if current postgres version is pg 11
-func shouldSkip(expectedSourceVersion string) bool {
-	return !strings.Contains(os.Getenv("POSTGRES_IMG"), ":11"+expectedSourceVersion)
+// shouldSkip skip this test if the current POSTGRES_IMG is already the latest major
+func shouldSkip(postgresImage string) bool {
+	// Get the current tag
+	currentImageReference := utils.NewReference(postgresImage)
+	currentImageVersion, err := postgres.GetPostgresVersionFromTag(currentImageReference.Tag)
+	Expect(err).ToNot(HaveOccurred())
+	// Get the default tag
+	defaultImageReference := utils.NewReference(versions.DefaultImageName)
+	defaultImageVersion, err := postgres.GetPostgresVersionFromTag(defaultImageReference.Tag)
+	Expect(err).ToNot(HaveOccurred())
+
+	return currentImageVersion >= defaultImageVersion
 }
 
 // assertCreateTableWithDataOnSourceCluster creates a new user `micro` in the source cluster,
@@ -300,12 +319,12 @@ func assertImportRenamesSelectedDatabase(
 	})
 
 	By("importing Database with microservice approach in a new cluster", func() {
-		err = testsUtils.ImportDatabaseMicroservice(namespace, importedClusterName,
-			clusterName, dbToImport, env, imageName)
+		err = testsUtils.ImportDatabaseMicroservice(namespace, clusterName,
+			importedClusterName, imageName, dbToImport, env)
 		Expect(err).ToNot(HaveOccurred())
 		// We give more time than the usual 600s, since the recovery is slower
 		AssertClusterIsReady(namespace, importedClusterName, 1000, env)
-		assertClusterStandbysAreStreaming(namespace, importedClusterName)
+		AssertClusterStandbysAreStreaming(namespace, importedClusterName, 120)
 	})
 
 	AssertDataExpectedCount(namespace, importedClusterName, tableName, 2, psqlClientPod)

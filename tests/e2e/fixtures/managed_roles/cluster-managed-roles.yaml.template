@@ -22,12 +22,20 @@ spec:
       replication: false
       bypassrls: false
       connectionLimit: 4
-      validUntil: "2023-04-12T15:04:05Z"
       inRoles:
         - pg_monitor
         - pg_signal_backend
       passwordSecret:
         name: cluster-example-dante
+    - name: petrarca
+      ensure: present
+      comment: Dante Alighieri
+      inRoles:
+        - foobar
+    - name: app
+      createdb: true
+      login: true
+
 ---
 apiVersion: v1
 data:

@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -68,6 +69,14 @@ func (cm *clientMock) Scheme() *runtime.Scheme {
 
 func (cm *clientMock) RESTMapper() meta.RESTMapper {
 	return nil
+}
+
+func (cm *clientMock) GroupVersionKindFor(_ runtime.Object) (schema.GroupVersionKind, error) {
+	return schema.GroupVersionKind{}, nil
+}
+
+func (cm *clientMock) IsObjectNamespaced(_ runtime.Object) (bool, error) {
+	return false, nil
 }
 
 var _ = Describe("Reconcile Resources", func() {
@@ -401,10 +410,83 @@ var _ = Describe("Storage configuration", func() {
 		Expect(err).To(BeNil())
 	})
 
-	It("fail if we look for the wrong role ", func() {
+	It("fail if we look for the wrong role", func() {
 		configuration, err := getStorageConfiguration(cluster, "NoRol")
 		Expect(err).ToNot(BeNil())
 		Expect(configuration.StorageClass).To(BeNil())
+	})
+})
+
+var _ = Describe("Storage source", func() {
+	When("bootstrapping from a VolumeSnapshot", func() {
+		pgDataSnapshotVolumeName := "pgdata-snapshot"
+		pgWalSnapshotVolumeName := "pgwal-snapshot"
+		cluster := &apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				StorageConfiguration: apiv1.StorageConfiguration{},
+				WalStorage:           &apiv1.StorageConfiguration{},
+				Bootstrap: &apiv1.BootstrapConfiguration{
+					Recovery: &apiv1.BootstrapRecovery{
+						VolumeSnapshots: &apiv1.DataSource{
+							Storage: corev1.TypedLocalObjectReference{
+								Name:     pgDataSnapshotVolumeName,
+								Kind:     "VolumeSnapshot",
+								APIGroup: pointer.String("snapshot.storage.k8s.io"),
+							},
+							WalStorage: &corev1.TypedLocalObjectReference{
+								Name:     pgWalSnapshotVolumeName,
+								Kind:     "VolumeSnapshot",
+								APIGroup: pointer.String("snapshot.storage.k8s.io"),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		When("working on the first instance", func() {
+			It("should fail when looking for a wrong role", func() {
+				_, err := getStorageSource(cluster, "NoRol", 1)
+				Expect(err).ToNot(BeNil())
+			})
+
+			It("should return the correct source when chosing pgdata", func() {
+				source, err := getStorageSource(cluster, utils.PVCRolePgData, 1)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(source).ToNot(BeNil())
+				Expect(source.Name).To(Equal(pgDataSnapshotVolumeName))
+			})
+
+			It("should return the correct source when chosing pgwal", func() {
+				source, err := getStorageSource(cluster, utils.PVCRolePgWal, 1)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(source).ToNot(BeNil())
+				Expect(source.Name).To(Equal(pgWalSnapshotVolumeName))
+			})
+		})
+
+		When("working on instances beside the first one", func() {
+			It("should always return nil", func() {
+				source, err := getStorageSource(cluster, utils.PVCRolePgData, 2)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(source).To(BeNil())
+			})
+		})
+	})
+
+	When("not bootstrapping from a VolumeSnapshot", func() {
+		cluster := &apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				StorageConfiguration: apiv1.StorageConfiguration{},
+				WalStorage:           &apiv1.StorageConfiguration{},
+			},
+		}
+
+		It("should return an empty storage source", func() {
+			source, err := getStorageSource(cluster, utils.PVCRolePgData, 1)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(source).To(BeNil())
+		})
 	})
 })
 

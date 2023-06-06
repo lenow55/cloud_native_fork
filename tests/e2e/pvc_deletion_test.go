@@ -33,11 +33,12 @@ import (
 
 var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 	const (
-		namespace   = "cluster-pvc-deletion"
-		sampleFile  = fixturesDir + "/pvc_deletion/cluster-pvc-deletion.yaml.template"
-		clusterName = "cluster-pvc-deletion"
-		level       = tests.Medium
+		namespacePrefix = "cluster-pvc-deletion"
+		sampleFile      = fixturesDir + "/pvc_deletion/cluster-pvc-deletion.yaml.template"
+		clusterName     = "cluster-pvc-deletion"
+		level           = tests.Medium
 	)
+	var namespace string
 	BeforeEach(func() {
 		if testLevelEnv.Depth < int(level) {
 			Skip("Test depth is lower than the amount requested for this test")
@@ -45,8 +46,9 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 	})
 
 	It("correctly manages PVCs", func() {
+		var err error
 		// Create a cluster in a namespace we'll delete after the test
-		err := env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			if CurrentSpecReport().Failed() {
@@ -80,11 +82,10 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 			originalPVCUID := pvc.GetUID()
 
 			// Delete the pod
-			zero := int64(0)
-			forceDelete := &ctrlclient.DeleteOptions{
-				GracePeriodSeconds: &zero,
+			quickDelete := &ctrlclient.DeleteOptions{
+				GracePeriodSeconds: &quickDeletionPeriod,
 			}
-			err = env.DeletePod(namespace, podName, forceDelete)
+			err = env.DeletePod(namespace, podName, quickDelete)
 			Expect(err).ToNot(HaveOccurred())
 
 			// The pod should be back
@@ -115,7 +116,7 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 			err := env.Client.Get(env.Ctx, podNamespacedName, pod)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Get the UID of the pod
+			// Get the UID of the PVC
 			pvcName := pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName
 			pvc := &corev1.PersistentVolumeClaim{}
 			namespacedPVCName := types.NamespacedName{
@@ -130,23 +131,31 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 			walStorageEnabled, err := testsUtils.IsWalStorageEnabled(namespace, clusterName, env)
 			Expect(err).ToNot(HaveOccurred())
 
+			// Force delete setting
+			quickDelete := &ctrlclient.DeleteOptions{
+				GracePeriodSeconds: &quickDeletionPeriod,
+			}
+
 			// Delete the PVC and the Pod
-			_, _, err = testsUtils.Run(
-				fmt.Sprintf("kubectl delete pvc %v -n %v --wait=false", pvcName, namespace))
+			err = env.Client.Delete(env.Ctx, pvc, quickDelete)
 			Expect(err).ToNot(HaveOccurred())
 
 			// removing WalStorage PVC if needed
 			if walStorageEnabled {
-				_, _, err = testsUtils.Run(
-					fmt.Sprintf("kubectl delete pvc %v-wal -n %v --wait=false", pvcName, namespace))
+				walPvcName := fmt.Sprintf("%v-wal", pvcName)
+				namespacedWalPVCName := types.NamespacedName{
+					Namespace: namespace,
+					Name:      walPvcName,
+				}
+				walPVC := &corev1.PersistentVolumeClaim{}
+				err = env.Client.Get(env.Ctx, namespacedWalPVCName, walPVC)
+				Expect(err).ToNot(HaveOccurred())
+				err = env.Client.Delete(env.Ctx, walPVC, quickDelete)
 				Expect(err).ToNot(HaveOccurred())
 			}
+
 			// Deleting primary pod
-			zero := int64(0)
-			forceDelete := &ctrlclient.DeleteOptions{
-				GracePeriodSeconds: &zero,
-			}
-			err = env.DeletePod(namespace, podName, forceDelete)
+			err = env.DeletePod(namespace, podName, quickDelete)
 			Expect(err).ToNot(HaveOccurred())
 
 			// A new pod should be created
@@ -161,6 +170,7 @@ var _ = Describe("PVC Deletion", Label(tests.LabelSelfHealing), func() {
 				err := env.Client.Get(env.Ctx, newPodNamespacedName, newPod)
 				return utils.IsPodActive(*newPod) && utils.IsPodReady(*newPod), err
 			}, timeout).Should(BeTrue())
+
 			// The pod should have a different PVC
 			newPod := &corev1.Pod{}
 			err = env.Client.Get(env.Ctx, newPodNamespacedName, newPod)

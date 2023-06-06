@@ -9,6 +9,7 @@ spec:
   startDelay: 300
   stopDelay: 300
   primaryUpdateStrategy: unsupervised
+  primaryUpdateMethod: switchover
 
   postgresql:
     parameters:
@@ -21,6 +22,7 @@ spec:
       log_temp_files: '1024'
       log_autovacuum_min_duration: '1s'
       log_replication_commands: 'on'
+      wal_receiver_timeout: '2s'
     pg_hba:
       - host all all 10.244.0.0/16 md5
 
@@ -34,6 +36,7 @@ spec:
     name: cluster-superuser
 
   backup:
+    target: primary
     barmanObjectStore:
       destinationPath: s3://cluster-full-backup/
       endpointURL: http://minio-service:9000

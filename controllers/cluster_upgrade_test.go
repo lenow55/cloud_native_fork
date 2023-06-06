@@ -28,15 +28,22 @@ import (
 )
 
 var _ = Describe("Pod upgrade", func() {
-	cluster := apiv1.Cluster{
-		Spec: apiv1.ClusterSpec{
-			ImageName: "postgres:13.0",
-		},
-	}
+	var cluster apiv1.Cluster
+
+	BeforeEach(func() {
+		cluster = apiv1.Cluster{
+			Spec: apiv1.ClusterSpec{
+				ImageName: "postgres:13.0",
+			},
+		}
+	})
+
 	It("will not require a restart for just created Pods", func() {
 		pod := specs.PodWithExistingStorage(cluster, 1)
-		Expect(isPodNeedingRestart(&cluster, postgres.PostgresqlStatus{Pod: *pod})).
-			To(BeFalse())
+
+		needRestart, reason := isPodNeedingRestart(&cluster, postgres.PostgresqlStatus{Pod: *pod})
+		Expect(needRestart).To(BeFalse())
+		Expect(reason).To(BeEmpty())
 	})
 
 	It("checks when we are running a different image name", func() {
@@ -53,23 +60,30 @@ var _ = Describe("Pod upgrade", func() {
 		clusterRestart := cluster
 		clusterRestart.Annotations = make(map[string]string)
 		clusterRestart.Annotations[specs.ClusterRestartAnnotationName] = "now"
-		Expect(isPodNeedingRestart(&clusterRestart, postgres.PostgresqlStatus{Pod: *pod})).
-			To(BeTrue())
-		Expect(isPodNeedingRestart(&cluster, postgres.PostgresqlStatus{Pod: *pod})).
-			To(BeFalse())
+
+		needRestart, reason := isPodNeedingRestart(&clusterRestart, postgres.PostgresqlStatus{Pod: *pod})
+		Expect(needRestart).To(BeTrue())
+		Expect(reason).ToNot(BeEmpty())
+
+		needRestart, reason = isPodNeedingRestart(&cluster, postgres.PostgresqlStatus{Pod: *pod})
+		Expect(needRestart).To(BeFalse())
+		Expect(reason).To(BeEmpty())
 	})
 
 	It("checks when a restart is being needed by PostgreSQL", func() {
 		pod := specs.PodWithExistingStorage(cluster, 1)
-		Expect(isPodNeedingRestart(&cluster, postgres.PostgresqlStatus{Pod: *pod})).
-			To(BeFalse())
 
-		Expect(isPodNeedingRestart(&cluster,
+		needRestart, reason := isPodNeedingRestart(&cluster, postgres.PostgresqlStatus{Pod: *pod})
+		Expect(needRestart).To(BeFalse())
+		Expect(reason).To(BeEmpty())
+
+		needRestart, reason = isPodNeedingRestart(&cluster,
 			postgres.PostgresqlStatus{
 				Pod:            *pod,
 				PendingRestart: true,
-			})).
-			To(BeTrue())
+			})
+		Expect(needRestart).To(BeTrue())
+		Expect(reason).ToNot(BeEmpty())
 	})
 
 	It("checks when a rollout is being needed for any reason", func() {
@@ -91,6 +105,15 @@ var _ = Describe("Pod upgrade", func() {
 		Expect(needRollout).To(BeTrue())
 		Expect(inplacePossible).To(BeTrue())
 		Expect(reason).To(BeEquivalentTo("configuration needs a restart to apply some configuration changes"))
+	})
+
+	It("should trigger a rollout when the scheduler changes", func() {
+		pod := specs.PodWithExistingStorage(cluster, 1)
+		cluster.Spec.SchedulerName = "newScheduler"
+
+		rollout, reason := isPodNeedingUpdatedScheduler(&cluster, *pod)
+		Expect(rollout).To(BeTrue())
+		Expect(reason).ToNot(BeEmpty())
 	})
 
 	When("there's a custom environment variable set", func() {

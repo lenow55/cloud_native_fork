@@ -17,7 +17,7 @@ permissions:
 jobs:
 
   release:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       -
         name: Checkout
@@ -51,7 +51,7 @@ jobs:
 
   release-binaries:
     name: Build containers
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.build-meta.outputs.version }}
       digest: ${{ steps.build.outputs.digest }}
@@ -67,16 +67,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GOLANG_VERSION }}
-      -
-        name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
       -
         name: Build meta
         id: build-meta
@@ -128,7 +118,7 @@ jobs:
       -
         name: Publish Krew
         if: ${{ env.SKIP_KREW == 'false' }}
-        uses: rajatjindal/krew-release-bot@v0.0.43
+        uses: rajatjindal/krew-release-bot@v0.0.46
         with:
           krew_template_file: dist/cnpg.yaml
       -

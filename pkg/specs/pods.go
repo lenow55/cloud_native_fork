@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/url"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
@@ -205,7 +206,7 @@ func createPostgresContainers(cluster apiv1.Cluster, envConfig EnvConfig) []core
 					Protocol:      "TCP",
 				},
 			},
-			SecurityContext: CreateContainerSecurityContext(),
+			SecurityContext: CreateContainerSecurityContext(cluster.GetSeccompProfile()),
 		},
 	}
 
@@ -304,15 +305,12 @@ func CreateGeneratedAntiAffinity(clusterName string, config apiv1.AffinityConfig
 }
 
 // CreatePodSecurityContext defines the security context under which the containers are running
-func CreatePodSecurityContext(user, group int64) *corev1.PodSecurityContext {
+func CreatePodSecurityContext(seccompProfile *corev1.SeccompProfile, user, group int64) *corev1.PodSecurityContext {
 	// Under Openshift we inherit SecurityContext from the restricted security context constraint
 	if utils.HaveSecurityContextConstraints() {
 		return nil
 	}
 
-	seccompProfile := &corev1.SeccompProfile{
-		Type: corev1.SeccompProfileTypeRuntimeDefault,
-	}
 	if !utils.HaveSeccompSupport() {
 		seccompProfile = nil
 	}
@@ -350,20 +348,27 @@ func PodWithExistingStorage(cluster apiv1.Cluster, nodeSerial int) *corev1.Pod {
 			Namespace: cluster.Namespace,
 		},
 		Spec: corev1.PodSpec{
-			Hostname:  podName,
-			Subdomain: cluster.GetServiceAnyName(),
+			Hostname: podName,
 			InitContainers: []corev1.Container{
 				createBootstrapContainer(cluster),
 			},
-			Containers:                    createPostgresContainers(cluster, envConfig),
-			Volumes:                       createPostgresVolumes(cluster, podName),
-			SecurityContext:               CreatePodSecurityContext(cluster.GetPostgresUID(), cluster.GetPostgresGID()),
+			SchedulerName: cluster.Spec.SchedulerName,
+			Containers:    createPostgresContainers(cluster, envConfig),
+			Volumes:       createPostgresVolumes(cluster, podName),
+			SecurityContext: CreatePodSecurityContext(
+				cluster.GetSeccompProfile(),
+				cluster.GetPostgresUID(),
+				cluster.GetPostgresGID()),
 			Affinity:                      CreateAffinitySection(cluster.Name, cluster.Spec.Affinity),
 			Tolerations:                   cluster.Spec.Affinity.Tolerations,
 			ServiceAccountName:            cluster.Name,
 			NodeSelector:                  cluster.Spec.Affinity.NodeSelector,
 			TerminationGracePeriodSeconds: &gracePeriod,
 		},
+	}
+
+	if configuration.Current.CreateAnyService {
+		pod.Spec.Subdomain = cluster.GetServiceAnyName()
 	}
 
 	if utils.IsAnnotationAppArmorPresent(cluster.Annotations) {

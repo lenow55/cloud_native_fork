@@ -135,6 +135,13 @@ type ClusterSpec struct {
 	// +optional
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
+	// If specified, the pod will be dispatched by specified Kubernetes
+	// scheduler. If not specified, the pod will be dispatched by the default
+	// scheduler. More info:
+	// https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/
+	// +optional
+	SchedulerName string `json:"schedulerName,omitempty"`
+
 	// The UID of the `postgres` user inside the image, defaults to `26`
 	// +kubebuilder:default:=26
 	PostgresUID int64 `json:"postgresUID,omitempty"`
@@ -242,7 +249,7 @@ type ClusterSpec struct {
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// Strategy to follow to upgrade the primary server during a rolling
+	// Deployment strategy to follow to upgrade the primary server during a rolling
 	// update procedure, after all replicas have been successfully updated:
 	// it can be automated (`unsupervised` - default) or manual (`supervised`)
 	// +kubebuilder:default:=unsupervised
@@ -251,8 +258,8 @@ type ClusterSpec struct {
 
 	// Method to follow to upgrade the primary server during a rolling
 	// update procedure, after all replicas have been successfully updated:
-	// it can be with a switchover (`switchover` - default) or in-place (`restart`)
-	// +kubebuilder:default:=switchover
+	// it can be with a switchover (`switchover`) or in-place (`restart` - default)
+	// +kubebuilder:default:=restart
 	// +kubebuilder:validation:Enum:=switchover;restart
 	PrimaryUpdateMethod PrimaryUpdateMethod `json:"primaryUpdateMethod,omitempty"`
 
@@ -292,6 +299,10 @@ type ClusterSpec struct {
 
 	// The configuration that is used by the portions of PostgreSQL that are managed by the instance manager
 	Managed *ManagedConfiguration `json:"managed,omitempty"`
+
+	// The SeccompProfile applied to every Pod and Container.
+	// Defaults to: `RuntimeDefault`
+	SeccompProfile *corev1.SeccompProfile `json:"seccompProfile,omitempty"`
 }
 
 const (
@@ -405,6 +416,19 @@ type PasswordState struct {
 	SecretResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
+// ManagedRoles tracks the status of a cluster's managed roles
+type ManagedRoles struct {
+	// ByStatus gives the list of roles in each state
+	ByStatus map[RoleStatus][]string `json:"byStatus,omitempty"`
+
+	// CannotReconcile lists roles that cannot be reconciled in PostgreSQL,
+	// with an explanation of the cause
+	CannotReconcile map[string][]string `json:"cannotReconcile,omitempty"`
+
+	// PasswordStatus gives the last transaction id and password secret version for each managed role
+	PasswordStatus map[string]PasswordState `json:"passwordStatus,omitempty"`
+}
+
 // ClusterStatus defines the observed state of Cluster
 type ClusterStatus struct {
 	// The total number of PVC Groups detected in the cluster. It may differ from the number of existing instance pods.
@@ -419,11 +443,8 @@ type ClusterStatus struct {
 	// The reported state of the instances during the last reconciliation loop
 	InstancesReportedState map[PodName]InstanceReportedState `json:"instancesReportedState,omitempty"`
 
-	// RoleStatus gives the list of roles in each state
-	RoleStatus map[RoleStatus][]string `json:"roleStatus,omitempty"`
-
-	// RolePasswordStatus gives the last transaction id and hash for each managed role
-	RolePasswordStatus map[string]PasswordState `json:"rolePasswordStatus,omitempty"`
+	// ManagedRolesStatus reports the state of the managed roles in the cluster
+	ManagedRolesStatus ManagedRoles `json:"managedRolesStatus,omitempty"`
 
 	// The timeline of the Postgres cluster
 	TimelineID int `json:"timelineID,omitempty"`
@@ -677,7 +698,8 @@ type ReplicationSlotsHAConfiguration struct {
 	// from the designated primary to its cascading replicas. This can only
 	// be set at creation time.
 	// +optional
-	Enabled bool `json:"enabled"`
+	// +kubebuilder:default:=false
+	Enabled *bool `json:"enabled"`
 
 	// Prefix for replication slots managed by the operator for HA.
 	// It may only contain lower case letters, numbers, and the underscore character.
@@ -698,7 +720,7 @@ func (r *ReplicationSlotsHAConfiguration) GetSlotPrefix() string {
 // GetSlotNameFromInstanceName returns the slot name, given the instance name.
 // It returns an empty string if High Availability Replication Slots are disabled
 func (r *ReplicationSlotsHAConfiguration) GetSlotNameFromInstanceName(instanceName string) string {
-	if r == nil || !r.Enabled {
+	if r == nil || !r.GetEnabled() {
 		return ""
 	}
 
@@ -710,6 +732,14 @@ func (r *ReplicationSlotsHAConfiguration) GetSlotNameFromInstanceName(instanceNa
 	sanitizedName := slotNameNegativeRegex.ReplaceAllString(strings.ToLower(slotName), "_")
 
 	return sanitizedName
+}
+
+// GetEnabled returns true if replication slots are enabled, default is false
+func (r *ReplicationSlotsHAConfiguration) GetEnabled() bool {
+	if r != nil && r.Enabled != nil {
+		return *r.Enabled
+	}
+	return false
 }
 
 // KubernetesUpgradeStrategy tells the operator if the user want to
@@ -1055,18 +1085,35 @@ type PostInitApplicationSQLRefs struct {
 }
 
 // BootstrapRecovery contains the configuration required to restore
-// the backup with the specified name and, after having changed the password
-// with the one chosen for the superuser, will use it to bootstrap a full
-// cluster cloning all the instances from the restored primary.
+// from an existing cluster using 3 methodologies: external cluster,
+// volume snapshots or backup objects. Full recovery and Point-In-Time
+// Recovery are supported.
+// The method can be also be used to create clusters in continuous recovery
+// (replica clusters), also supporting cascading replication when `instances` >
+// 1. Once the cluster exits recovery, the password for the superuser
+// will be changed through the provided secret.
 // Refer to the Bootstrap page of the documentation for more information.
 type BootstrapRecovery struct {
-	// The backup we need to restore
+	// The backup object containing the physical base backup from which to
+	// initiate the recovery procedure.
+	// Mutually exclusive with `source` and `volumeSnapshots`.
 	Backup *BackupSource `json:"backup,omitempty"`
 
 	// The external cluster whose backup we will restore. This is also
 	// used as the name of the folder under which the backup is stored,
 	// so it must be set to the name of the source cluster
+	// Mutually exclusive with `backup` and `volumeSnapshots`.
 	Source string `json:"source,omitempty"`
+
+	// The static PVC data source(s) from which to initiate the
+	// recovery procedure. Currently supporting `VolumeSnapshot`
+	// and `PersistentVolumeClaim` resources that map an existing
+	// PVC group, compatible with CloudNativePG, and taken with
+	// a cold backup copy on a fenced Postgres instance (limitation
+	// which will be removed in the future when online backup
+	// will be implemented).
+	// Mutually exclusive with `backup` and `source`.
+	VolumeSnapshots *DataSource `json:"volumeSnapshots,omitempty"`
 
 	// By default, the recovery process applies all the available
 	// WAL files in the archive (full recovery). However, you can also
@@ -1090,6 +1137,16 @@ type BootstrapRecovery struct {
 	// created from scratch
 	// +optional
 	Secret *LocalObjectReference `json:"secret,omitempty"`
+}
+
+// DataSource contains the configuration required to bootstrap a
+// PostgreSQL cluster from an existing storage
+type DataSource struct {
+	// Configuration of the storage of the instances
+	Storage corev1.TypedLocalObjectReference `json:"storage"`
+
+	// Configuration of the storage for PostgreSQL WAL (Write-Ahead Log)
+	WalStorage *corev1.TypedLocalObjectReference `json:"walStorage,omitempty"`
 }
 
 // BackupSource contains the backup we need to restore from, plus some
@@ -1287,7 +1344,7 @@ const (
 	BackupTargetStandby = BackupTarget("prefer-standby")
 
 	// DefaultBackupTarget is the default BackupTarget
-	DefaultBackupTarget = BackupTargetPrimary
+	DefaultBackupTarget = BackupTargetStandby
 )
 
 // CompressionType encapsulates the available types of compression
@@ -1401,11 +1458,11 @@ type BackupConfiguration struct {
 	RetentionPolicy string `json:"retentionPolicy,omitempty"`
 
 	// The policy to decide which instance should perform backups. Available
-	// options are empty string, which will default to `primary` policy, `primary`
-	// to have backups run always on primary instances, `prefer-standby` to have
-	// backups run preferably on the most updated standby, if available.
+	// options are empty string, which will default to `prefer-standby` policy,
+	// `primary` to have backups run always on primary instances, `prefer-standby`
+	// to have backups run preferably on the most updated standby, if available.
 	// +kubebuilder:validation:Enum=primary;prefer-standby
-	// +kubebuilder:default:=primary
+	// +kubebuilder:default:=prefer-standby
 	Target BackupTarget `json:"target,omitempty"`
 }
 
@@ -1625,7 +1682,10 @@ type RoleConfiguration struct {
 	Ensure EnsureOption `json:"ensure,omitempty"`
 
 	// Secret containing the password of the role (if present)
+	// If null, the password will be ignored unless DisablePassword is set
 	PasswordSecret *LocalObjectReference `json:"passwordSecret,omitempty"`
+	// DisablePassword indicates that a role's password should be set to NULL in Postgres
+	DisablePassword bool `json:"disablePassword,omitempty"`
 	// Whether the role is a `superuser` who can override all access
 	// restrictions within the database - superuser status is dangerous and
 	// should be used only when really needed. You must yourself be a
@@ -1670,6 +1730,7 @@ type RoleConfiguration struct {
 	// Date and time after which the role's password is no longer valid.
 	// When omitted, the password will never expire (default).
 	ValidUntil *metav1.Time `json:"validUntil,omitempty"`
+
 	// List of one or more existing roles to which this role will be
 	// immediately added as a new member. Default empty.
 	InRoles []string `json:"inRoles,omitempty"`
@@ -2041,11 +2102,11 @@ func (cluster *Cluster) GetPrimaryUpdateStrategy() PrimaryUpdateStrategy {
 }
 
 // GetPrimaryUpdateMethod get the cluster primary update method,
-// defaulting to switchover
+// defaulting to restart
 func (cluster *Cluster) GetPrimaryUpdateMethod() PrimaryUpdateMethod {
 	strategy := cluster.Spec.PrimaryUpdateMethod
 	if strategy == "" {
-		return PrimaryUpdateMethodSwitchover
+		return PrimaryUpdateMethodRestart
 	}
 
 	return strategy
@@ -2264,7 +2325,7 @@ var slotNameNegativeRegex = regexp.MustCompile("[^a-z0-9_]+")
 func (cluster Cluster) GetSlotNameFromInstanceName(instanceName string) string {
 	if cluster.Spec.ReplicationSlots == nil ||
 		cluster.Spec.ReplicationSlots.HighAvailability == nil ||
-		!cluster.Spec.ReplicationSlots.HighAvailability.Enabled {
+		!cluster.Spec.ReplicationSlots.HighAvailability.GetEnabled() {
 		return ""
 	}
 
@@ -2455,6 +2516,17 @@ func (cluster *Cluster) ShouldForceLegacyBackup() bool {
 	const legacyBackupAnnotationName = "cnpg.io/forceLegacyBackup"
 
 	return cluster.Annotations[legacyBackupAnnotationName] == "true"
+}
+
+// GetSeccompProfile return the proper SeccompProfile set in the cluster for Pods and Containers
+func (cluster *Cluster) GetSeccompProfile() *corev1.SeccompProfile {
+	if cluster.Spec.SeccompProfile != nil {
+		return cluster.Spec.SeccompProfile
+	}
+
+	return &corev1.SeccompProfile{
+		Type: corev1.SeccompProfileTypeRuntimeDefault,
+	}
 }
 
 // IsBarmanBackupConfigured returns true if one of the possible backup destination

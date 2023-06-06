@@ -29,6 +29,8 @@ import (
 	"github.com/cheynewallace/tabby"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -150,7 +152,9 @@ func (env TestingEnvironment) DumpOperatorLogs(getPrevious bool, requestedLineLe
 	}()
 
 	_, _ = fmt.Fprintf(f, "Dumping operator pod %v log\n", pod.Name)
-	return logs.GetPodLogs(env.Ctx, pod, getPrevious, f, requestedLineLength)
+	conf := ctrl.GetConfigOrDie()
+	client := kubernetes.NewForConfigOrDie(conf)
+	return logs.GetPodLogs(env.Ctx, client, pod, getPrevious, f, requestedLineLength)
 }
 
 // DumpNamespaceObjects logs the clusters, pods, pvcs etc. found in a namespace as JSON sections
@@ -281,7 +285,14 @@ func (env TestingEnvironment) GetClusterPrimary(namespace string, clusterName st
 		return &corev1.Pod{}, err
 	}
 	if len(podList.Items) > 0 {
-		return &(podList.Items[0]), nil
+		// if there are multiple, get the one without deletion timestamp
+		for _, pod := range podList.Items {
+			if pod.DeletionTimestamp == nil {
+				return &pod, nil
+			}
+		}
+		err = fmt.Errorf("all pod with primary role has deletion timestamp")
+		return &(podList.Items[0]), err
 	}
 	err = fmt.Errorf("no primary found")
 	return &corev1.Pod{}, err

@@ -40,12 +40,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/configuration"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/log"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/postgres"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/hibernation"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/persistentvolumeclaim"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/specs"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
@@ -270,6 +270,19 @@ func (r *ClusterReconciler) reconcile(ctx context.Context, cluster *apiv1.Cluste
 				"isPodReady", isPodReady)
 			return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 		}
+	}
+
+	// If the user has requested to hibernate the cluster, we do that before
+	// ensuring the primary to be healthy. The hibernation starts from the
+	// primary Pod to ensure the replicas are in sync and doing it here avoids
+	// any unwanted switchover.
+	if result, err := hibernation.Reconcile(
+		ctx,
+		r.Client,
+		cluster,
+		resources.instances.Items,
+	); result != nil || err != nil {
+		return *result, err
 	}
 
 	// We have already updated the status in updateResourceStatus call,
@@ -765,22 +778,22 @@ func (r *ClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Watches(
-			&source.Kind{Type: &corev1.ConfigMap{}},
-			handler.EnqueueRequestsFromMapFunc(r.mapConfigMapsToClusters(ctx)),
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.mapConfigMapsToClusters()),
 			builder.WithPredicates(configMapsPredicate),
 		).
 		Watches(
-			&source.Kind{Type: &corev1.Secret{}},
-			handler.EnqueueRequestsFromMapFunc(r.mapSecretsToClusters(ctx)),
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.mapSecretsToClusters()),
 			builder.WithPredicates(secretsPredicate),
 		).
 		Watches(
-			&source.Kind{Type: &apiv1.Pooler{}},
-			handler.EnqueueRequestsFromMapFunc(r.mapPoolersToClusters(ctx)),
+			&apiv1.Pooler{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPoolersToClusters()),
 		).
 		Watches(
-			&source.Kind{Type: &corev1.Node{}},
-			handler.EnqueueRequestsFromMapFunc(r.mapNodeToClusters(ctx)),
+			&corev1.Node{},
+			handler.EnqueueRequestsFromMapFunc(r.mapNodeToClusters()),
 			builder.WithPredicates(nodesPredicate),
 		).
 		Complete(r)
@@ -906,8 +919,8 @@ func IsOwnedByCluster(obj client.Object) (string, bool) {
 }
 
 // mapSecretsToClusters returns a function mapping cluster events watched to cluster reconcile requests
-func (r *ClusterReconciler) mapSecretsToClusters(ctx context.Context) handler.MapFunc {
-	return func(obj client.Object) []reconcile.Request {
+func (r *ClusterReconciler) mapSecretsToClusters() handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		secret, ok := obj.(*corev1.Secret)
 		if !ok {
 			return nil
@@ -960,8 +973,8 @@ func (r *ClusterReconciler) getClustersForSecretsOrConfigMapsToClustersMapper(
 }
 
 // mapPoolersToClusters returns a function mapping pooler events watched to cluster reconcile requests
-func (r *ClusterReconciler) mapPoolersToClusters(ctx context.Context) handler.MapFunc {
-	return func(obj client.Object) []reconcile.Request {
+func (r *ClusterReconciler) mapPoolersToClusters() handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		pooler, ok := obj.(*apiv1.Pooler)
 		if !ok || pooler.Spec.Cluster.Name == "" {
 			return nil
@@ -980,8 +993,8 @@ func (r *ClusterReconciler) mapPoolersToClusters(ctx context.Context) handler.Ma
 }
 
 // mapNodeToClusters returns a function mapping cluster events watched to cluster reconcile requests
-func (r *ClusterReconciler) mapConfigMapsToClusters(ctx context.Context) handler.MapFunc {
-	return func(obj client.Object) []reconcile.Request {
+func (r *ClusterReconciler) mapConfigMapsToClusters() handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		config, ok := obj.(*corev1.ConfigMap)
 		if !ok {
 			return nil
@@ -1041,8 +1054,8 @@ func filterClustersUsingConfigMap(
 }
 
 // mapNodeToClusters returns a function mapping cluster events watched to cluster reconcile requests
-func (r *ClusterReconciler) mapNodeToClusters(ctx context.Context) handler.MapFunc {
-	return func(obj client.Object) []reconcile.Request {
+func (r *ClusterReconciler) mapNodeToClusters() handler.MapFunc {
+	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		node := obj.(*corev1.Node)
 		// exit if the node is schedulable (e.g. not cordoned)
 		// could be expanded here with other conditions (e.g. pressure or issues)

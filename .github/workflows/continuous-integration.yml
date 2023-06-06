@@ -29,7 +29,7 @@ jobs:
   # Trigger the workflow on release-* branches for smoke testing whenever it's a scheduled run.
   # Note: this is a workaround since we can't directly schedule-run a workflow from a non default branch
   smoke_test_release_branches:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: smoke test release-* branches when it's a scheduled run
     if: github.event_name == 'schedule'
     strategy:
@@ -38,6 +38,7 @@ jobs:
         branch:
           - release-1.18
           - release-1.19
+          - release-1.20
     steps:
       - name: Invoke workflow with inputs
         uses: benc-uk/workflow-dispatch@v121
@@ -49,7 +50,7 @@ jobs:
   #   1. it's on 'main' branch
   #   2. it's triggered by events in the 'do_not_skip' list
   duplicate_runs:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: Skip duplicate runs
     continue-on-error: true
     outputs:
@@ -70,7 +71,7 @@ jobs:
     name: Check changed files
     needs: duplicate_runs
     if: ${{ needs.duplicate_runs.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     outputs:
       docs-changed: ${{ steps.filter.outputs.docs-changed }}
       operator-changed: ${{ steps.filter.outputs.operator-changed }}
@@ -125,7 +126,7 @@ jobs:
     if: |
       needs.duplicate_runs.outputs.should_skip != 'true' &&
       needs.change-triage.outputs.go-code-changed == 'true'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -133,6 +134,8 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v4
         with:
+          # Disable setup-go caching. Cache is better handled by the golangci-lint action
+          cache: false
           go-version: ${{ env.GOLANG_VERSION }}
 
       - name: Run golangci-lint
@@ -154,7 +157,7 @@ jobs:
     if: |
       needs.duplicate_runs.outputs.should_skip != 'true' &&
       needs.change-triage.outputs.shell-script-changed == 'true'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     env:
         SHELLCHECK_OPTS: -a -S style
     steps:
@@ -176,7 +179,7 @@ jobs:
         needs.change-triage.outputs.operator-changed == 'true' ||
         needs.change-triage.outputs.go-code-changed == 'true'
       )
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     outputs:
       k8sMatrix: ${{ steps.get-k8s-versions.outputs.k8s_versions }}
       latest_k8s_version: ${{ steps.get-k8s-versions.outputs.latest_k8s_version }}
@@ -215,7 +218,7 @@ jobs:
         needs.change-triage.outputs.operator-changed == 'true' ||
         needs.change-triage.outputs.go-code-changed == 'true'
       )
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         # The Unit test is performed per multiple supported k8s versions (each job for each k8s version) as below:
@@ -228,18 +231,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GOLANG_VERSION }}
-
-      # Cache Go modules on GitHub runners to be reused across jobs
-      # See to: https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Run unit tests
         env:
@@ -269,7 +260,7 @@ jobs:
         needs.change-triage.outputs.go-code-changed == 'true' ||
         needs.change-triage.outputs.docs-changed == 'true'
       )
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -300,7 +291,7 @@ jobs:
     if: |
       needs.duplicate_runs.outputs.should_skip != 'true' &&
       needs.change-triage.outputs.go-code-changed == 'true'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -352,7 +343,7 @@ jobs:
       (needs.tests.result == 'success' || needs.tests.result == 'skipped') &&
       (needs.apidoc.result == 'success' || needs.apidoc.result == 'skipped') &&
       (needs.crd.result == 'success' || needs.crd.result == 'skipped')
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: read
@@ -367,16 +358,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GOLANG_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Build meta
         run: |

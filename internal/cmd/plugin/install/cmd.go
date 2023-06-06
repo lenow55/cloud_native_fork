@@ -26,7 +26,6 @@ func NewCmd() *cobra.Command {
 		Use:   "install",
 		Short: "CNPG installation commands",
 	}
-
 	cmd.AddCommand(newGenerateCmd())
 
 	return cmd

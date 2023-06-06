@@ -33,7 +33,9 @@ import (
 	"github.com/thoas/go-funk"
 	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 	k8sscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	// +kubebuilder:scaffold:imports
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -60,6 +62,8 @@ var (
 	operatorPodWasRenamed   bool
 	operatorWasRestarted    bool
 	operatorLogDumped       bool
+	quickDeletionPeriod     = int64(1)
+	testTimeouts            map[utils.Timeout]int
 )
 
 var _ = SynchronizedBeforeSuite(func() []byte {
@@ -69,6 +73,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 
 	pod, err := utils.GetPsqlClient(psqlClientNamespace, env)
 	Expect(err).ShouldNot(HaveOccurred())
+	DeferCleanup(func() {
+		err := env.DeleteNamespaceAndWait(psqlClientNamespace, 300)
+		Expect(err).ToNot(HaveOccurred())
+	})
 	// here we serialized psql client pod object info and will be
 	// accessible to all nodes (specs)
 	psqlPodJSONObj, err := json.Marshal(pod)
@@ -90,6 +98,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	if err != nil {
 		panic(err)
 	}
+	testTimeouts, err = utils.Timeouts()
+	if err != nil {
+		panic(err)
+	}
 	if err := json.Unmarshal(data, &psqlClientPod); err != nil {
 		panic(err)
 	}
@@ -97,8 +109,6 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 
 var _ = SynchronizedAfterSuite(func() {
 }, func() {
-	err := env.DeleteNamespaceAndWait(psqlClientNamespace, 300)
-	Expect(err).ToNot(HaveOccurred())
 })
 
 // saveOperatorLogs does 2 things:
@@ -188,7 +198,9 @@ var _ = BeforeEach(func() {
 	var buf bytes.Buffer
 	go func() {
 		// get logs without timestamp parsing; for JSON parseability
-		err = logs.TailPodLogs(context.TODO(), operatorPod, &buf, false)
+		conf := ctrl.GetConfigOrDie()
+		client := kubernetes.NewForConfigOrDie(conf)
+		err = logs.TailPodLogs(context.TODO(), client, operatorPod, &buf, false)
 		if err != nil {
 			_, _ = fmt.Fprintf(&buf, "Error tailing logs, dumping operator logs: %v\n", err)
 		}

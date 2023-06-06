@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -68,6 +69,23 @@ type PoolerSpec struct {
 
 	// The PgBouncer configuration
 	PgBouncer *PgBouncerSpec `json:"pgbouncer"`
+
+	// The deployment strategy to use for pgbouncer to replace existing pods with new ones
+	DeploymentStrategy *appsv1.DeploymentStrategy `json:"deploymentStrategy,omitempty"`
+
+	// The configuration of the monitoring infrastructure of this pooler.
+	Monitoring *PoolerMonitoringConfiguration `json:"monitoring,omitempty"`
+}
+
+// PoolerMonitoringConfiguration is the type containing all the monitoring
+// configuration for a certain Pooler.
+//
+// Mirrors the Cluster's MonitoringConfiguration but without the custom queries
+// part for now.
+type PoolerMonitoringConfiguration struct {
+	// Enable or disable the `PodMonitor`
+	// +kubebuilder:default:=false
+	EnablePodMonitor bool `json:"enablePodMonitor,omitempty"`
 }
 
 // PodTemplateSpec is a structure allowing the user to set

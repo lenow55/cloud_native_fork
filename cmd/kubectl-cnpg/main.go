@@ -40,6 +40,7 @@ import (
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/reload"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/report"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/restart"
+	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/snapshot"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/status"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/versions"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/log"
@@ -57,6 +58,14 @@ func main() {
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			logFlags.ConfigureLogging()
+
+			// If we're invoking the completion command we shouldn't try to create
+			// a Kubernetes client and we just let the Cobra flow to continue
+			if cmd.Name() == "completion" || cmd.Name() == "version" ||
+				cmd.HasParent() && cmd.Parent().Name() == "completion" {
+				return nil
+			}
+
 			return plugin.SetupKubernetesClient(configFlags)
 		},
 	}
@@ -80,6 +89,7 @@ func main() {
 	rootCmd.AddCommand(versions.NewCmd())
 	rootCmd.AddCommand(backup.NewCmd())
 	rootCmd.AddCommand(psql.NewCmd())
+	rootCmd.AddCommand(snapshot.NewCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

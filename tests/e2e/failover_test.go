@@ -182,11 +182,10 @@ var _ = Describe("Failover", Label(tests.LabelSelfHealing), func() {
 				Namespace: namespace,
 				Name:      clusterName,
 			}
-			zero := int64(0)
-			forceDelete := &ctrlclient.DeleteOptions{
-				GracePeriodSeconds: &zero,
+			quickDelete := &ctrlclient.DeleteOptions{
+				GracePeriodSeconds: &quickDeletionPeriod,
 			}
-			err := env.DeletePod(namespace, currentPrimary, forceDelete)
+			err := env.DeletePod(namespace, currentPrimary, quickDelete)
 			Expect(err).ToNot(HaveOccurred())
 
 			// We wait until the operator knows that the primary is dead.
@@ -221,15 +220,17 @@ var _ = Describe("Failover", Label(tests.LabelSelfHealing), func() {
 				}, timeout).Should(Not(Equal("")))
 			}
 
-			By("making sure that the the targetPrimary because the new currentPrimary")
+			By("making sure that the the targetPrimary has switched away from current primary")
 			// The operator should eventually set the cluster target primary to
 			// the instance we expect to take that role (-3).
-			timeout = 120
 			Eventually(func() (string, error) {
 				cluster := &apiv1.Cluster{}
 				err := env.Client.Get(env.Ctx, namespacedName, cluster)
 				return cluster.Status.TargetPrimary, err
-			}, timeout).ShouldNot(Or(BeEquivalentTo(currentPrimary), BeEquivalentTo(apiv1.PendingFailoverMarker)))
+			}, testTimeouts[utils.NewTargetOnFailover]).
+				ShouldNot(
+					Or(BeEquivalentTo(currentPrimary),
+						BeEquivalentTo(apiv1.PendingFailoverMarker)))
 			cluster := &apiv1.Cluster{}
 			err = env.Client.Get(env.Ctx, namespacedName, cluster)
 			Expect(cluster.Status.TargetPrimary, err).To(
@@ -238,17 +239,16 @@ var _ = Describe("Failover", Label(tests.LabelSelfHealing), func() {
 
 		// Finally, the cluster current primary should be changed by the
 		// operator to the target primary
-		By("waiting that the TargetPrimary become also CurrentPrimary", func() {
+		By("waiting for the TargetPrimary to become CurrentPrimary", func() {
 			namespacedName := types.NamespacedName{
 				Namespace: namespace,
 				Name:      clusterName,
 			}
-			timeout := 30
 			Eventually(func() (string, error) {
 				cluster := &apiv1.Cluster{}
 				err := env.Client.Get(env.Ctx, namespacedName, cluster)
 				return cluster.Status.CurrentPrimary, err
-			}, timeout).Should(BeEquivalentTo(targetPrimary))
+			}, testTimeouts[utils.NewPrimaryAfterFailover]).Should(BeEquivalentTo(targetPrimary))
 		})
 	}
 
@@ -270,13 +270,14 @@ var _ = Describe("Failover", Label(tests.LabelSelfHealing), func() {
 	// before deciding which instance to promote (which should be the third).
 	It("reacts to primary failure", func() {
 		const (
-			sampleFile  = fixturesDir + "/base/cluster-storage-class.yaml.template"
-			clusterName = "postgresql-storage-class"
-			namespace   = "failover-e2e"
+			sampleFile      = fixturesDir + "/base/cluster-storage-class.yaml.template"
+			clusterName     = "postgresql-storage-class"
+			namespacePrefix = "failover-e2e"
 		)
-
+		var namespace string
+		var err error
 		// Create a cluster in a namespace we'll delete after the test
-		err := env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			if CurrentSpecReport().Failed() {
@@ -292,11 +293,13 @@ var _ = Describe("Failover", Label(tests.LabelSelfHealing), func() {
 
 	It("reacts to primary failure while respecting the delay", func() {
 		const (
-			sampleFile  = fixturesDir + "/failover/cluster-failover-delay.yaml.template"
-			clusterName = "failover-delay"
-			namespace   = "failover-e2e-delay"
+			sampleFile      = fixturesDir + "/failover/cluster-failover-delay.yaml.template"
+			clusterName     = "failover-delay"
+			namespacePrefix = "failover-e2e-delay"
 		)
-		err := env.CreateNamespace(namespace)
+		var namespace string
+		var err error
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			if CurrentSpecReport().Failed() {

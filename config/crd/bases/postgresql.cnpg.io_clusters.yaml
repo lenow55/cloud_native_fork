@@ -3,8 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.11.3
-  creationTimestamp: null
+    controller-gen.kubebuilder.io/version: v0.12.0
   name: clusters.postgresql.cnpg.io
 spec:
   group: postgresql.cnpg.io
@@ -1232,11 +1231,11 @@ spec:
                     pattern: ^[1-9][0-9]*[dwm]$
                     type: string
                   target:
-                    default: primary
+                    default: prefer-standby
                     description: The policy to decide which instance should perform
                       backups. Available options are empty string, which will default
-                      to `primary` policy, `primary` to have backups run always on
-                      primary instances, `prefer-standby` to have backups run preferably
+                      to `prefer-standby` policy, `primary` to have backups run always
+                      on primary instances, `prefer-standby` to have backups run preferably
                       on the most updated standby, if available.
                     enum:
                     - primary
@@ -1449,7 +1448,9 @@ spec:
                     description: Bootstrap the cluster from a backup
                     properties:
                       backup:
-                        description: The backup we need to restore
+                        description: The backup object containing the physical base
+                          backup from which to initiate the recovery procedure. Mutually
+                          exclusive with `source` and `volumeSnapshots`.
                         properties:
                           endpointCA:
                             description: EndpointCA store the CA bundle of the barman
@@ -1539,8 +1540,61 @@ spec:
                         description: The external cluster whose backup we will restore.
                           This is also used as the name of the folder under which
                           the backup is stored, so it must be set to the name of the
-                          source cluster
+                          source cluster Mutually exclusive with `backup` and `volumeSnapshots`.
                         type: string
+                      volumeSnapshots:
+                        description: The static PVC data source(s) from which to initiate
+                          the recovery procedure. Currently supporting `VolumeSnapshot`
+                          and `PersistentVolumeClaim` resources that map an existing
+                          PVC group, compatible with CloudNativePG, and taken with
+                          a cold backup copy on a fenced Postgres instance (limitation
+                          which will be removed in the future when online backup will
+                          be implemented). Mutually exclusive with `backup` and `source`.
+                        properties:
+                          storage:
+                            description: Configuration of the storage of the instances
+                            properties:
+                              apiGroup:
+                                description: APIGroup is the group for the resource
+                                  being referenced. If APIGroup is not specified,
+                                  the specified Kind must be in the core API group.
+                                  For any other third-party types, APIGroup is required.
+                                type: string
+                              kind:
+                                description: Kind is the type of resource being referenced
+                                type: string
+                              name:
+                                description: Name is the name of resource being referenced
+                                type: string
+                            required:
+                            - kind
+                            - name
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          walStorage:
+                            description: Configuration of the storage for PostgreSQL
+                              WAL (Write-Ahead Log)
+                            properties:
+                              apiGroup:
+                                description: APIGroup is the group for the resource
+                                  being referenced. If APIGroup is not specified,
+                                  the specified Kind must be in the core API group.
+                                  For any other third-party types, APIGroup is required.
+                                type: string
+                              kind:
+                                description: Kind is the type of resource being referenced
+                                type: string
+                              name:
+                                description: Name is the name of resource being referenced
+                                type: string
+                            required:
+                            - kind
+                            - name
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        required:
+                        - storage
+                        type: object
                     type: object
                 type: object
               certificates:
@@ -2212,6 +2266,10 @@ spec:
                             and grant or revoke membership in other roles. Default
                             is `false`.
                           type: boolean
+                        disablePassword:
+                          description: DisablePassword indicates that a role's password
+                            should be set to NULL in Postgres
+                          type: boolean
                         ensure:
                           default: present
                           description: Ensure the role is `present` or `absent` -
@@ -2244,7 +2302,8 @@ spec:
                           type: string
                         passwordSecret:
                           description: Secret containing the password of the role
-                            (if present)
+                            (if present) If null, the password will be ignored unless
+                            DisablePassword is set
                           properties:
                             name:
                               description: Name of the referent.
@@ -2485,21 +2544,21 @@ spec:
                     type: object
                 type: object
               primaryUpdateMethod:
-                default: switchover
+                default: restart
                 description: 'Method to follow to upgrade the primary server during
                   a rolling update procedure, after all replicas have been successfully
-                  updated: it can be with a switchover (`switchover` - default) or
-                  in-place (`restart`)'
+                  updated: it can be with a switchover (`switchover`) or in-place
+                  (`restart` - default)'
                 enum:
                 - switchover
                 - restart
                 type: string
               primaryUpdateStrategy:
                 default: unsupervised
-                description: 'Strategy to follow to upgrade the primary server during
-                  a rolling update procedure, after all replicas have been successfully
-                  updated: it can be automated (`unsupervised` - default) or manual
-                  (`supervised`)'
+                description: 'Deployment strategy to follow to upgrade the primary
+                  server during a rolling update procedure, after all replicas have
+                  been successfully updated: it can be automated (`unsupervised` -
+                  default) or manual (`supervised`)'
                 enum:
                 - unsupervised
                 - supervised
@@ -2771,6 +2830,7 @@ spec:
                     description: Replication slots for high availability configuration
                     properties:
                       enabled:
+                        default: false
                         description: If enabled, the operator will automatically manage
                           replication slots on the primary instance and use them in
                           streaming replication connections with all the standby instances
@@ -2843,8 +2903,35 @@ spec:
                     description: 'Requests describes the minimum amount of compute
                       resources required. If Requests is omitted for a container,
                       it defaults to Limits if that is explicitly specified, otherwise
-                      to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                      to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                     type: object
+                type: object
+              schedulerName:
+                description: 'If specified, the pod will be dispatched by specified
+                  Kubernetes scheduler. If not specified, the pod will be dispatched
+                  by the default scheduler. More info: https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/'
+                type: string
+              seccompProfile:
+                description: 'The SeccompProfile applied to every Pod and Container.
+                  Defaults to: `RuntimeDefault`'
+                properties:
+                  localhostProfile:
+                    description: localhostProfile indicates a profile defined in a
+                      file on the node should be used. The profile must be preconfigured
+                      on the node to work. Must be a descending path, relative to
+                      the kubelet's configured seccomp profile location. Must only
+                      be set if type is "Localhost".
+                    type: string
+                  type:
+                    description: "type indicates which kind of seccomp profile will
+                      be applied. Valid options are: \n Localhost - a profile defined
+                      in a file on the node should be used. RuntimeDefault - the container
+                      runtime default profile should be used. Unconfined - no profile
+                      should be applied."
+                    type: string
+                required:
+                - type
                 type: object
               serviceAccountTemplate:
                 description: Configure the generation of the service account
@@ -3034,7 +3121,7 @@ spec:
                               compute resources required. If Requests is omitted for
                               a container, it defaults to Limits if that is explicitly
                               specified, otherwise to an implementation-defined value.
-                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                              Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                             type: object
                         type: object
                       selector:
@@ -3281,7 +3368,7 @@ spec:
                               compute resources required. If Requests is omitted for
                               a container, it defaults to Limits if that is explicitly
                               specified, otherwise to an implementation-defined value.
-                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                              Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                             type: object
                         type: object
                       selector:
@@ -3591,6 +3678,43 @@ spec:
                 description: ID of the latest generated node (used to avoid node name
                   clashing)
                 type: integer
+              managedRolesStatus:
+                description: ManagedRolesStatus reports the state of the managed roles
+                  in the cluster
+                properties:
+                  byStatus:
+                    additionalProperties:
+                      items:
+                        type: string
+                      type: array
+                    description: ByStatus gives the list of roles in each state
+                    type: object
+                  cannotReconcile:
+                    additionalProperties:
+                      items:
+                        type: string
+                      type: array
+                    description: CannotReconcile lists roles that cannot be reconciled
+                      in PostgreSQL, with an explanation of the cause
+                    type: object
+                  passwordStatus:
+                    additionalProperties:
+                      description: PasswordState represents the state of the password
+                        of a managed RoleConfiguration
+                      properties:
+                        resourceVersion:
+                          description: the resource version of the password secret
+                          type: string
+                        transactionID:
+                          description: the last transaction ID to affect the role
+                            definition in PostgreSQL
+                          format: int64
+                          type: integer
+                      type: object
+                    description: PasswordStatus gives the last transaction id and
+                      password secret version for each managed role
+                    type: object
+                type: object
               onlineUpdateEnabled:
                 description: OnlineUpdateEnabled shows if the online upgrade is enabled
                   inside the cluster
@@ -3630,30 +3754,6 @@ spec:
                 items:
                   type: string
                 type: array
-              rolePasswordStatus:
-                additionalProperties:
-                  description: PasswordState represents the state of the password
-                    of a managed RoleConfiguration
-                  properties:
-                    resourceVersion:
-                      description: the resource version of the password secret
-                      type: string
-                    transactionID:
-                      description: the last transaction ID to affect the role definition
-                        in PostgreSQL
-                      format: int64
-                      type: integer
-                  type: object
-                description: RolePasswordStatus gives the last transaction id and
-                  hash for each managed role
-                type: object
-              roleStatus:
-                additionalProperties:
-                  items:
-                    type: string
-                  type: array
-                description: RoleStatus gives the list of roles in each state
-                type: object
               secretsResourceVersion:
                 description: The list of resource versions of the secrets managed
                   by the operator. Every change here is done in the interest of the

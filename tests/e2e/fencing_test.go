@@ -158,7 +158,7 @@ var _ = Describe("Fencing", Label(tests.LabelPlugin), func() {
 				Expect(beforeFencingPodName).Should(BeEquivalentTo(currentPrimaryPodInfo.GetName()))
 			})
 			By("all followers should be streaming again from the primary instance", func() {
-				assertClusterStandbysAreStreaming(namespace, clusterName)
+				AssertClusterStandbysAreStreaming(namespace, clusterName, 120)
 			})
 			checkFencingAnnotationSet(fencingMethod, nil)
 		})
@@ -166,7 +166,7 @@ var _ = Describe("Fencing", Label(tests.LabelPlugin), func() {
 	assertFencingFollowerWorks := func(fencingMethod testUtils.FencingMethod) {
 		It("can fence a follower instance", func() {
 			var beforeFencingPodName string
-			AssertClusterIsReady(namespace, clusterName, 120, env)
+			AssertClusterIsReady(namespace, clusterName, testTimeouts[testUtils.ClusterIsReadyQuick], env)
 			By("fence a follower instance", func() {
 				podList, _ := env.GetClusterPodList(namespace, clusterName)
 				Expect(len(podList.Items)).To(BeEquivalentTo(3))
@@ -249,11 +249,11 @@ var _ = Describe("Fencing", Label(tests.LabelPlugin), func() {
 	Context("using kubectl-cnpg plugin", Ordered, func() {
 		var err error
 		BeforeAll(func() {
-			namespace = "fencing-using-plugin"
+			const namespacePrefix = "fencing-using-plugin"
 			clusterName, err = env.GetResourceNameFromYAML(sampleFile)
 			Expect(err).ToNot(HaveOccurred())
 			// Create a cluster in a namespace we'll delete after the test
-			err = env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)
@@ -268,11 +268,11 @@ var _ = Describe("Fencing", Label(tests.LabelPlugin), func() {
 	Context("using annotation", Ordered, func() {
 		var err error
 		BeforeAll(func() {
-			namespace = "fencing-using-annotation"
+			const namespacePrefix = "fencing-using-annotation"
 			clusterName, err = env.GetResourceNameFromYAML(sampleFile)
 			Expect(err).ToNot(HaveOccurred())
 			// Create a cluster in a namespace we'll delete after the test
-			err = env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)

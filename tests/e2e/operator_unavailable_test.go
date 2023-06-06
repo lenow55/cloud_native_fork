@@ -50,15 +50,17 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 	})
 
 	Context("Scale down operator replicas to zero and delete primary", func() {
-		const namespace = "op-unavailable-e2e-zero-replicas"
+		const namespacePrefix = "op-unavailable-e2e-zero-replicas"
+		var namespace string
 		JustAfterEach(func() {
 			if CurrentSpecReport().Failed() {
 				env.DumpNamespaceObjects(namespace, "out/"+CurrentSpecReport().LeafNodeText+".log")
 			}
 		})
 		It("can survive operator failures", func() {
+			var err error
 			// Create the cluster namespace
-			err := env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)
@@ -93,11 +95,10 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 
 			By("deleting primary pod", func() {
 				// Force-delete the primary
-				zero := int64(0)
-				forceDelete := &ctrlclient.DeleteOptions{
-					GracePeriodSeconds: &zero,
+				quickDelete := &ctrlclient.DeleteOptions{
+					GracePeriodSeconds: &quickDeletionPeriod,
 				}
-				err = env.DeletePod(namespace, currentPrimary, forceDelete)
+				err = env.DeletePod(namespace, currentPrimary, quickDelete)
 				Expect(err).ToNot(HaveOccurred())
 
 				// Expect only 2 instances to be up and running
@@ -164,7 +165,8 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 	})
 
 	Context("Delete primary and operator concurrently", func() {
-		const namespace = "op-unavailable-e2e-delete-operator"
+		const namespacePrefix = "op-unavailable-e2e-delete-operator"
+		var namespace string
 		JustAfterEach(func() {
 			if CurrentSpecReport().Failed() {
 				env.DumpNamespaceObjects(namespace, "out/"+CurrentSpecReport().LeafNodeText+".log")
@@ -172,8 +174,9 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 		})
 		It("can survive operator failures", func() {
 			var operatorPodName string
+			var err error
 			// Create the cluster namespace
-			err := env.CreateNamespace(namespace)
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
 				return env.DeleteNamespace(namespace)
@@ -197,20 +200,19 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 				operatorPodName = podList.Items[0].ObjectMeta.Name
 
 				// Force-delete the operator and the primary
-				zero := int64(0)
-				forceDelete := &ctrlclient.DeleteOptions{
-					GracePeriodSeconds: &zero,
+				quickDelete := &ctrlclient.DeleteOptions{
+					GracePeriodSeconds: &quickDeletionPeriod,
 				}
 
 				wg := sync.WaitGroup{}
 				wg.Add(1)
 				wg.Add(1)
 				go func() {
-					_ = env.DeletePod(operatorNamespace, operatorPodName, forceDelete)
+					_ = env.DeletePod(operatorNamespace, operatorPodName, quickDelete)
 					wg.Done()
 				}()
 				go func() {
-					_ = env.DeletePod(namespace, currentPrimary, forceDelete)
+					_ = env.DeletePod(namespace, currentPrimary, quickDelete)
 					wg.Done()
 				}()
 				wg.Wait()
@@ -223,22 +225,18 @@ var _ = Describe("Operator unavailable", Serial, Label(tests.LabelDisruptive, te
 						ctrlclient.MatchingLabels{utils.ClusterLabelName: "operator-unavailable"},
 					)
 					Expect(err).ToNot(HaveOccurred())
-					return int32(len(podList.Items))
+					return int32(len(utils.FilterActivePods(podList.Items)))
 				}, 120).Should(BeEquivalentTo(2))
 			})
 
 			By("verifying the operator pod is now back", func() {
 				timeout := 120
-				Eventually(func() (int, error) {
+				Eventually(func() (bool, error) {
 					podList := &corev1.PodList{}
 					err := env.Client.List(env.Ctx, podList, ctrlclient.InNamespace(operatorNamespace))
-					return utils.CountReadyPods(podList.Items), err
-				}, timeout).Should(BeEquivalentTo(1))
-				// Check that the new operator pod has been created with a different name
-				podList := &corev1.PodList{}
-				err := env.Client.List(env.Ctx, podList, ctrlclient.InNamespace(operatorNamespace))
-				Expect(err).ToNot(HaveOccurred())
-				Expect(podList.Items[0].ObjectMeta.Name).ShouldNot(BeEquivalentTo(operatorPodName))
+					return utils.CountReadyPods(podList.Items) == 1 &&
+						podList.Items[0].ObjectMeta.Name != operatorPodName, err
+				}, timeout).Should(BeTrue())
 			})
 
 			// Expect a new primary to be elected and promoted

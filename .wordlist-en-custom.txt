@@ -1,6 +1,7 @@
 AES
 API's
 APIs
+ARMv
 AcolumnName
 AdditionalPodAffinity
 AdditionalPodAntiAffinity
@@ -33,6 +34,7 @@ BootstrapInitDB
 BootstrapPgBaseBackup
 BootstrapRecovery
 Burstable
+ByStatus
 CIS
 CKA
 CN
@@ -45,6 +47,7 @@ CRD
 CRDs
 CSV
 CSVs
+CannotReconcile
 Canovai
 Cecchi
 CertificatesConfiguration
@@ -89,9 +92,13 @@ DISA
 DNS
 DataBackupConfiguration
 DataBase
+DataSource
+DeploymentStrategy
 DevOps
 DevSecOps
 Dhilip
+DigitalOcean
+DisablePassword
 DoD
 DockerHub
 Dockle
@@ -99,6 +106,7 @@ EBS
 EDB
 EKS
 EOF
+EOL
 EmbeddedObjectMetadata
 EncryptionType
 EndpointCA
@@ -136,6 +144,7 @@ Huß
 IAM
 INPLACE
 IOPS
+IPv
 IRSA
 Ibryam
 IfNotPresent
@@ -145,6 +154,7 @@ Innocenti
 InstanceID
 InstanceReportedState
 Istio
+Istio's
 JSON
 Jihyuk
 Jitendra
@@ -171,6 +181,8 @@ LocalObjectReference
 MAPPEDMETRIC
 MVCC
 ManagedConfiguration
+ManagedRoles
+ManagedRolesStatus
 MetricDescription
 MetricName
 MetricType
@@ -197,6 +209,7 @@ OOM
 OU
 ObjectMeta
 OnlineUpdateEnabled
+OnlineUpgrading
 OpenShift
 Openshift
 OperatorGroup
@@ -204,6 +217,7 @@ OperatorHub
 PGAudit
 PGDATA
 PGDG
+PGData
 PGSQL
 PKI
 PODNAME
@@ -212,6 +226,7 @@ PV
 PVCs
 PasswordConfiguration
 PasswordState
+PasswordStatus
 Patroni
 PersistentVolumeClaim
 PersistentVolumeClaimSpec
@@ -239,6 +254,7 @@ Pooler
 Pooler's
 PoolerIntegrations
 PoolerList
+PoolerMonitoringConfiguration
 PoolerSecrets
 PoolerSecretsVersions
 PoolerSpec
@@ -298,6 +314,7 @@ ScheduledBackupSpec
 ScheduledBackupStatus
 ScheduledBackups
 Scorsolini
+SeccompProfile
 SecretKeySelector
 SecretRefs
 SecretVersion
@@ -313,6 +330,7 @@ ServiceMonitor
 Silvela
 Slonik
 SnapshotType
+Snapshotting
 StatefulSets
 StorageClass
 StorageConfiguration
@@ -326,14 +344,17 @@ TOC
 TODO
 TimelineId
 TopologyKey
+TypedLocalObjectReference
 UID
 Uncomment
+Unrealizable
 VLDB
 VM
 VMs
 VOLNAME
 Valerio
 VirtualBox
+VolumeSnapshot
 WAL
 WAL's
 WALBackupConfiguration
@@ -369,9 +390,11 @@ apiserver
 apparmor
 appdb
 applicationCredentials
+appsv
 appuser
 archiver
 args
+armru
 async
 auth
 authQuerySecret
@@ -386,6 +409,7 @@ azurite
 ba
 backend
 backends
+backport
 backupID
 backupId
 backupOwnerReference
@@ -421,6 +445,7 @@ ce
 cheatsheet
 checksums
 chmod
+ciclops
 cioni
 cisecurity
 claimRef
@@ -583,6 +608,7 @@ imagePullPolicy
 imagePullSecrets
 img
 immediateCheckpoint
+impactful
 inProgress
 indistinctively
 inheritFromAzureAD
@@ -686,6 +712,7 @@ nextScheduleTime
 nginx
 nodeMaintenanceWindow
 nodeSelector
+nodeToClusters
 nodemaintenancewindow
 nodev
 noexec
@@ -792,6 +819,9 @@ recoveryTarget
 recoverytarget
 recv
 redhat
+rehydrate
+rehydrated
+rehydration
 relatime
 replicationSlots
 replicationTLSSecret
@@ -844,6 +874,8 @@ shmmax
 sig
 sigs
 singlenamespace
+snapshotted
+snapshotting
 sourceNamespace
 specificities
 sql
@@ -877,6 +909,7 @@ storageclasses
 storageconfiguration
 strflocaltime
 subcommand
+subcommands
 subdirectory
 subresource
 substatement
@@ -917,6 +950,8 @@ ul
 un
 uncordon
 unencrypted
+unfence
+unfencing
 unix
 upgradable
 usename
@@ -929,6 +964,7 @@ virtualized
 virtualxid
 volumeMode
 volumeMounts
+volumesnapshot
 wal
 walSegmentSize
 walStorage

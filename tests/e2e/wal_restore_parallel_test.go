@@ -77,11 +77,11 @@ var _ = Describe("Wal-restore in parallel", Label(tests.LabelBackupRestore), fun
 				"/backup/minio/cluster-with-backup-minio-with-wal-max-parallel.yaml.template"
 		)
 
-		namespace = "pg-backup-minio-wal-max-parallel"
+		const namespacePrefix = "pg-backup-minio-wal-max-parallel"
 		clusterName, err := env.GetResourceNameFromYAML(clusterWithMinioSampleFile)
 		Expect(err).ToNot(HaveOccurred())
 
-		err = env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			if CurrentSpecReport().Failed() {
@@ -97,7 +97,7 @@ var _ = Describe("Wal-restore in parallel", Label(tests.LabelBackupRestore), fun
 		By("setting up minio", func() {
 			setup, err := testUtils.MinioDefaultSetup(namespace)
 			Expect(err).ToNot(HaveOccurred())
-			err = testUtils.InstallMinio(env, setup, 300)
+			err = testUtils.InstallMinio(env, setup, uint(testTimeouts[testUtils.MinioInstallation]))
 			Expect(err).ToNot(HaveOccurred())
 		})
 

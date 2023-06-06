@@ -36,7 +36,6 @@ import (
 
 var _ = Describe("Fast switchover", Serial, Label(tests.LabelPerformance, tests.LabelSelfHealing), func() {
 	const (
-		namespace                      = "primary-switchover-time"
 		sampleFileWithReplicationSlots = fixturesDir +
 			"/fastswitchover/cluster-fast-switchover-with-repl-slots.yaml.template"
 		sampleFileWithoutReplicationSlots = fixturesDir + "/fastswitchover/cluster-fast-switchover.yaml.template"
@@ -45,6 +44,7 @@ var _ = Describe("Fast switchover", Serial, Label(tests.LabelPerformance, tests.
 		clusterName                       = "cluster-fast-switchover"
 		level                             = tests.Highest
 	)
+	var namespace string
 	BeforeEach(func() {
 		if testLevelEnv.Depth < int(level) {
 			Skip("Test depth is lower than the amount requested for this test")
@@ -53,11 +53,7 @@ var _ = Describe("Fast switchover", Serial, Label(tests.LabelPerformance, tests.
 			Skip("This test is not run on an IBM architecture")
 		}
 	})
-	JustAfterEach(func() {
-		if CurrentSpecReport().Failed() {
-			env.DumpNamespaceObjects(namespace, "out/"+CurrentSpecReport().LeafNodeText+".log")
-		}
-	})
+
 	// Confirm that a standby closely following the primary doesn't need more
 	// than maxSwitchoverTime seconds to be promoted and be able to start
 	// inserting records. We then expect the old primary to be back in
@@ -68,9 +64,14 @@ var _ = Describe("Fast switchover", Serial, Label(tests.LabelPerformance, tests.
 	Context("without HA Replication Slots", func() {
 		It("can do a fast switchover", func() {
 			// Create a cluster in a namespace we'll delete after the test
-			err := env.CreateNamespace(namespace)
+			const namespacePrefix = "primary-switchover-time"
+			var err error
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
+				if CurrentSpecReport().Failed() {
+					env.DumpNamespaceObjects(namespace, "out/"+CurrentSpecReport().LeafNodeText+".log")
+				}
 				return env.DeleteNamespaceAndWait(namespace, 60)
 			})
 			assertFastSwitchover(namespace, sampleFileWithoutReplicationSlots, clusterName, webTestFile, webTestJob)
@@ -79,9 +80,14 @@ var _ = Describe("Fast switchover", Serial, Label(tests.LabelPerformance, tests.
 	Context("with HA Replication Slots", func() {
 		It("can do a fast switchover", func() {
 			// Create a cluster in a namespace we'll delete after the test
-			err := env.CreateNamespace(namespace)
+			const namespacePrefix = "primary-switchover-time-with-slots"
+			var err error
+			namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 			Expect(err).ToNot(HaveOccurred())
 			DeferCleanup(func() error {
+				if CurrentSpecReport().Failed() {
+					env.DumpNamespaceObjects(namespace, "out/"+CurrentSpecReport().LeafNodeText+".log")
+				}
 				return env.DeleteNamespaceAndWait(namespace, 60)
 			})
 			assertFastSwitchover(namespace, sampleFileWithReplicationSlots, clusterName, webTestFile, webTestJob)
@@ -111,7 +117,7 @@ func assertFastSwitchover(namespace, sampleFile, clusterName, webTestFile, webTe
 		CreateResourceFromFile(namespace, sampleFile)
 	})
 	By("having a Cluster with three instances ready", func() {
-		AssertClusterIsReady(namespace, clusterName, 600, env)
+		AssertClusterIsReady(namespace, clusterName, testTimeouts[utils.ClusterIsReady], env)
 	})
 	// Node 1 should be the primary, so the -rw service should
 	// point there. We verify this.

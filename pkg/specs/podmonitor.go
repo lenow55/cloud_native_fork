@@ -21,16 +21,25 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
 )
 
-// CreatePodMonitor create a new podmonitor for cluster
-func CreatePodMonitor(cluster *apiv1.Cluster) *monitoringv1.PodMonitor {
+// ClusterPodMonitorManager builds the PodMonitor for the cluster resource
+type ClusterPodMonitorManager struct {
+	cluster *apiv1.Cluster
+}
+
+// IsPodMonitorEnabled returns a boolean indicating if the PodMonitor should exists or not
+func (c ClusterPodMonitorManager) IsPodMonitorEnabled() bool {
+	return c.cluster.IsPodMonitorEnabled()
+}
+
+// BuildPodMonitor builds a new PodMonitor object
+func (c ClusterPodMonitorManager) BuildPodMonitor() *monitoringv1.PodMonitor {
 	meta := metav1.ObjectMeta{
-		Namespace: cluster.Namespace,
-		Name:      cluster.Name,
+		Namespace: c.cluster.Namespace,
+		Name:      c.cluster.Name,
 	}
-	utils.LabelClusterName(&meta, cluster.Name)
+	c.cluster.SetInheritedDataAndOwnership(&meta)
 
 	spec := monitoringv1.PodMonitorSpec{
 		Selector: metav1.LabelSelector{
@@ -47,4 +56,9 @@ func CreatePodMonitor(cluster *apiv1.Cluster) *monitoringv1.PodMonitor {
 		ObjectMeta: meta,
 		Spec:       spec,
 	}
+}
+
+// NewClusterPodMonitorManager returns a new instance of ClusterPodMonitorManager
+func NewClusterPodMonitorManager(cluster *apiv1.Cluster) *ClusterPodMonitorManager {
+	return &ClusterPodMonitorManager{cluster: cluster}
 }

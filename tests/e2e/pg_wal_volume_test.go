@@ -44,7 +44,7 @@ var _ = Describe("Separate pg_wal volume", Label(tests.LabelBackupRestore), func
 		level                  = tests.High
 		expectedPvcCount       = 6
 	)
-
+	var namespace string
 	verifyPgWal := func(namespace string) {
 		podList, err := env.GetClusterPodList(namespace, clusterName)
 		Expect(len(podList.Items), err).To(BeEquivalentTo(3))
@@ -115,9 +115,10 @@ var _ = Describe("Separate pg_wal volume", Label(tests.LabelBackupRestore), func
 	// ensuring WAL files are archived to the correct location and a symlink
 	// to the PATH is present inside the PGDATA.
 	It("having a dedicated WAL volume", func() {
-		namespace := "pg-wal-volume-e2e"
+		const namespacePrefix = "pg-wal-volume-e2e"
+		var err error
 		// Create a cluster in a namespace we'll delete after the test
-		err := env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			if CurrentSpecReport().Failed() {
@@ -130,9 +131,10 @@ var _ = Describe("Separate pg_wal volume", Label(tests.LabelBackupRestore), func
 	})
 
 	It("adding a dedicated WAL volume after cluster is created", func() {
-		namespace := "add-pg-wal-volume-e2e"
+		const namespacePrefix = "add-pg-wal-volume-e2e"
+		var err error
 		// Create a cluster in a namespace we'll delete after the test
-		err := env.CreateNamespace(namespace)
+		namespace, err = env.CreateUniqueNamespace(namespacePrefix)
 		Expect(err).ToNot(HaveOccurred())
 		DeferCleanup(func() error {
 			if CurrentSpecReport().Failed() {
@@ -145,8 +147,9 @@ var _ = Describe("Separate pg_wal volume", Label(tests.LabelBackupRestore), func
 			updateWalStorage(namespace, clusterName)
 		})
 		AssertPVCCount(namespace, clusterName, expectedPvcCount, 120)
-		AssertClusterIsReady(namespace, clusterName, 120, env)
-		AssertClusterPhase(namespace, clusterName, apiv1.PhaseHealthy, 30)
+		AssertClusterEventuallyReachesPhase(namespace, clusterName, apiv1.PhaseUpgrade, 30)
+		AssertClusterIsReady(namespace, clusterName, testTimeouts[testsUtils.ClusterIsReadyQuick], env)
+		AssertClusterPhaseIsConsistent(namespace, clusterName, apiv1.PhaseHealthy, 30)
 		verifyPgWal(namespace)
 	})
 })
