@@ -29,6 +29,9 @@ import (
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/controller"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/pgbouncer"
+    //add import
+	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/pgpool"
+    //add import
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/show"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/walarchive"
 	"github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/walrestore"
@@ -60,6 +63,7 @@ func main() {
 	cmd.AddCommand(walrestore.NewCmd())
 	cmd.AddCommand(versions.NewCmd())
 	cmd.AddCommand(pgbouncer.NewCmd())
+	cmd.AddCommand(pgpool.NewCmd())
 
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
