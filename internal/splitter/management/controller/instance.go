@@ -24,21 +24,21 @@ import (
 
 	"k8s.io/client-go/util/retry"
 
-	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/pgbouncer/config"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/splitter/config"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/pool"
 )
 
-// PgBouncerInstanceInterface the public interface for a PgBouncer instance,
+// PgPool2InstanceInterface the public interface for a PgPool2 instance,
 // implementations should be thread safe
-type PgBouncerInstanceInterface interface {
+type PgPool2InstanceInterface interface {
 	Paused() bool
 	Pause() error
 	Resume() error
 	Reload() error
 }
 
-// NewPgBouncerInstance initializes a new pgBouncerInstance
-func NewPgBouncerInstance() PgBouncerInstanceInterface {
+// NewPgPool2Instance initializes a new pgPool2Instance
+func NewPgPool2Instance() PgPool2InstanceInterface {
 	dsn := fmt.Sprintf(
 		"host=%s port=%v user=%s sslmode=disable",
 		config.PgBouncerSocketDir,
@@ -46,14 +46,14 @@ func NewPgBouncerInstance() PgBouncerInstanceInterface {
 		config.PgBouncerAdminUser,
 	)
 
-	return &pgBouncerInstance{
+	return &pgPool2Instance{
 		mu:     &sync.RWMutex{},
 		paused: false,
 		pool:   pool.NewConnectionPool(dsn),
 	}
 }
 
-type pgBouncerInstance struct {
+type pgPool2Instance struct {
 	// The following two fields are used to keep track of
 	// pgbouncer being paused or not
 	mu     *sync.RWMutex
@@ -65,14 +65,14 @@ type pgBouncerInstance struct {
 }
 
 // Paused returns whether the pgbouncerInstance is paused or not, thread safe
-func (p *pgBouncerInstance) Paused() bool {
+func (p *pgPool2Instance) Paused() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.paused
 }
 
 // Pause the instance, thread safe
-func (p *pgBouncerInstance) Pause() error {
+func (p *pgPool2Instance) Pause() error {
 	// First step: connect to the pgbouncer administrative database
 	db, err := p.pool.Connection("pgbouncer")
 	if err != nil {
@@ -106,7 +106,7 @@ func (p *pgBouncerInstance) Pause() error {
 }
 
 // Resume the instance, thread safe
-func (p *pgBouncerInstance) Resume() error {
+func (p *pgPool2Instance) Resume() error {
 	// First step: connect to the pgbouncer administrative database
 	db, err := p.pool.Connection("pgbouncer")
 	if err != nil {
@@ -128,7 +128,7 @@ func (p *pgBouncerInstance) Resume() error {
 }
 
 // Reload issues a RELOAD command to the PgBouncer instance, returning any error
-func (p *pgBouncerInstance) Reload() error {
+func (p *pgPool2Instance) Reload() error {
 	// First step: connect to the pgbouncer administrative database
 	db, err := p.pool.Connection("pgbouncer")
 	if err != nil {
